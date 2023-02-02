@@ -1,7 +1,8 @@
 import argparse
 import logging
 import os
-
+import matplotlib.pyplot as plt
+import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -36,13 +37,15 @@ def predict_img(net,
     with torch.no_grad():
         output = net(img)[0].cpu()
         output = F.interpolate(output, full_img.shape[:2], mode='bilinear')
+        mask_pred = output.argmax(dim=1) if net.n_classes > 1 else torch.sigmoid(output) > out_threshold
+        mask_pred_det = mask_pred[0].long().squeeze().numpy()
 
-        if net.n_classes > 1:
-            mask_pred = output.argmax(dim=1)
-        else:
-            mask_pred = torch.sigmoid(output) > out_threshold
+        output = net(img)[1].cpu()
+        output = F.interpolate(output, full_img.shape[:2], mode='bilinear')
+        mask_pred = output.argmax(dim=1) if net.n_classes > 1 else torch.sigmoid(output) > out_threshold
+        mask_pred_seg = mask_pred[0].long().squeeze().numpy()
 
-    return mask_pred[0].long().squeeze().numpy()
+    return mask_pred_det, mask_pred_seg
 
 
 def get_args():
@@ -120,24 +123,45 @@ if __name__ == '__main__':
         mask_true = CTCDataset.preprocess(mask_true, -1, is_mask=True)
         seg_mask, det_mask = mask_true[0, ...], mask_true[1, ...]
 
-        mask = predict_img(net=net,
-                           full_img=img,
-                           img_size=args.img_size,
-                           out_threshold=args.mask_threshold,
-                           device=device)
+        det_mask_pred, seg_mask_pred = predict_img(net=net,
+                                                   full_img=img,
+                                                   img_size=args.img_size,
+                                                   out_threshold=args.mask_threshold,
+                                                   device=device)
+
+        # DET
+        det_mask_pred = mask_to_image(det_mask_pred, mask_values)
+        result_pred = det_vis(img, det_mask_pred, args.classes)
+
+        det_mask = mask_to_image(det_mask, mask_values)
+        result_true = det_vis(img, det_mask, args.classes)
+
+        result_det = np.hstack((result_true, result_pred))
+
+        # SEG
+        inter = 2 * (seg_mask_pred * seg_mask).sum(axis=(-1, -2))
+        sets_sum = seg_mask_pred.sum(axis=(-1, -2)) + seg_mask.sum(axis=(-1, -2))
+        sets_sum = np.where(sets_sum == 0, inter, sets_sum)
+        epsilon = 1e-6
+        dice = (inter + epsilon) / (sets_sum + epsilon)
+        logging.info(f'Dice score of segmentation: {dice:.3f}')
+
+        seg_mask_pred = mask_to_image(seg_mask_pred, mask_values)
+        seg_mask = mask_to_image(seg_mask, mask_values)
+        result_seg = np.hstack((seg_mask, seg_mask_pred))
+        result_seg = cv2.cvtColor(result_seg, cv2.COLOR_GRAY2RGB)
+
+        # RESULT
+        result = Image.fromarray(np.vstack((result_det, result_seg)))
 
         if not args.no_save:
             out_filename = out_files[i]
-            det_mask_pred = mask_to_image(mask, mask_values)
-            result_pred = det_vis(img, det_mask_pred, args.classes)
-
-            det_mask = mask_to_image(det_mask, mask_values)
-            result_true = det_vis(img, det_mask, args.classes)
-
-            result = Image.fromarray(np.hstack((result_true, result_pred)))
             result.save(out_filename)
             logging.info(f'Mask saved to {out_filename}')
 
         if args.viz:
             logging.info(f'Visualizing results for image {filename}, close to continue...')
-            plot_img_and_mask(img, mask)
+            # plot_img_and_mask(img, mask)
+            plt.imshow(result)
+            plt.xticks([]), plt.yticks([])
+            plt.show()
