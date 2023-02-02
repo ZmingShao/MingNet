@@ -1,0 +1,9 @@
+matplotlib~=3.5.3
+numpy~=1.21.5
+Pillow~=9.3.0
+torch~=1.9.1
+torchvision~=0.10.1
+tqdm~=4.64.1
+wandb~=0.13.5
+tifffile~=2021.7.2
+opencv-python~=4.5.5.64
