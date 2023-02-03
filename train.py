@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 import wandb
 from evaluate import evaluate
-from unet import UNet
+from networks import UNet
 from utils.data_loading import CTCDataset
 from utils.dice_score import dice_loss
 from utils.utils import DATA_SET
