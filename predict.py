@@ -21,7 +21,7 @@ ds_name = DATA_SET[3]
 dir_img = Path('./data/train/' + ds_name + '/01')
 dir_seg = Path('./data/train/' + ds_name + '/01_ST/SEG')
 dir_track = Path('./data/train/' + ds_name + '/01_GT/TRA')
-dir_checkpoint = Path('./checkpoints/' + ds_name + '/w0.3_e10_bs6_lr1e-05_sz512_amp1')
+dir_checkpoint = Path('./checkpoints/' + ds_name + '/w1.0_e10_bs4_lr1e-05_sz512_amp1')
 
 
 def predict_img(net,
@@ -35,12 +35,14 @@ def predict_img(net,
     img = img.to(device=device, dtype=torch.float32)
 
     with torch.no_grad():
-        output = net(img)[0].cpu()
+        outputs = net(img)
+        # DET
+        output = outputs[0].cpu()
         output = F.interpolate(output, full_img.shape[:2], mode='bilinear')
         mask_pred = output.argmax(dim=1) if net.n_classes > 1 else torch.sigmoid(output) > out_threshold
         mask_pred_det = mask_pred[0].long().squeeze().numpy()
-
-        output = net(img)[1].cpu()
+        # SEG
+        output = outputs[1].cpu()
         output = F.interpolate(output, full_img.shape[:2], mode='bilinear')
         mask_pred = output.argmax(dim=1) if net.n_classes > 1 else torch.sigmoid(output) > out_threshold
         mask_pred_seg = mask_pred[0].long().squeeze().numpy()

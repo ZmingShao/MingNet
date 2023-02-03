@@ -26,7 +26,7 @@ dir_seg = Path('./data/train/' + ds_name + '/02_ST/SEG')
 dir_track = Path('./data/train/' + ds_name + '/02_GT/TRA')
 dir_checkpoint = Path('./checkpoints/' + ds_name)
 
-mtl_weight = 0.3  # w * SEG + (1-w) * DETs
+mtl_weight = 1.0  # w * SEG + (1-w) * DETs
 
 
 def train_model(
@@ -107,12 +107,11 @@ def train_model(
                     mask_seg, mask_det = true_masks[:, 0, ...], true_masks[:, 1, ...]
                     if model.n_classes == 1:
                         loss_det = criterion(pred_det.squeeze(1), mask_det.float())
-                        loss_seg = criterion(pred_seg.squeeze(1), mask_seg.float())
-                        loss_seg += dice_loss(F.sigmoid(pred_seg.squeeze(1)), mask_seg.float(), multiclass=False)
+                        loss_seg = 0.5 * criterion(pred_seg.squeeze(1), mask_seg.float()) + 0.5 * dice_loss(
+                            F.sigmoid(pred_seg.squeeze(1)), mask_seg.float(), multiclass=False)
                     else:
                         loss_det = criterion(pred_det, mask_det)
-                        loss_seg = criterion(pred_seg, mask_seg)
-                        loss_seg += dice_loss(
+                        loss_seg = 0.5 * criterion(pred_seg, mask_seg) + 0.5 * dice_loss(
                             F.softmax(pred_seg, dim=1).float(),
                             F.one_hot(mask_seg, model.n_classes).permute(0, 3, 1, 2).float(),
                             multiclass=True
@@ -250,3 +249,4 @@ if __name__ == '__main__':
             val_percent=args.val / 100,
             amp=args.amp
         )
+

@@ -5,9 +5,9 @@ import cv2
 
 def det_vis(img, mask, n_classes=2):
     if len(img.shape) == 2:
-        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
     mask_values = [int(v / (n_classes - 1) * 255) for v in range(1, n_classes)] if n_classes > 1 else [255]
-    colors = [(0, 255, 0), (0, 0, 255), (255, 0, 0)]
+    colors = [(0, 255, 0), (255, 0, 0), (0, 0, 255)]
     for i, v in enumerate(mask_values):
         cnts, _ = cv2.findContours(np.uint8(mask == v), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
         for cnt in cnts:
