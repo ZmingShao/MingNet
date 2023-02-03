@@ -3,6 +3,8 @@ import logging
 import os
 import random
 import sys
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -15,7 +17,7 @@ from tqdm import tqdm
 
 import wandb
 from evaluate import evaluate
-from networks import UNet
+from networks import VisionTransformer, CONFIGS
 from utils.data_loading import CTCDataset
 from utils.dice_score import dice_loss
 from utils.utils import DATA_SET
@@ -26,7 +28,7 @@ dir_seg = Path('./data/train/' + ds_name + '/02_ST/SEG')
 dir_track = Path('./data/train/' + ds_name + '/02_GT/TRA')
 dir_checkpoint = Path('./checkpoints/' + ds_name)
 
-mtl_weight = 1.0  # w * SEG + (1-w) * DETs
+mtl_weight = 0.1  # w * SEG + (1-w) * DETs
 
 
 def train_model(
@@ -193,6 +195,12 @@ def get_args():
     parser.add_argument('--bilinear', action='store_true', default=False, help='Use bilinear upsampling')
     parser.add_argument('--channels', type=int, default=1, help='Number of channels; channels=3 for RGB images')
     parser.add_argument('--classes', '-c', type=int, default=2, help='Number of classes')
+    parser.add_argument('--n-skip', type=int,
+                        default=3, help='using number of skip-connect, default is num')
+    parser.add_argument('--vit-name', type=str,
+                        default='R50-ViT-B_16', help='select one vit model')
+    parser.add_argument('--vit-patches-size', type=int,
+                        default=16, help='vit_patches_size, default is 16')
 
     return parser.parse_args()
 
@@ -207,19 +215,30 @@ if __name__ == '__main__':
     # Change here to adapt to your data
     # n_channels=3 for RGB images
     # n_classes is the number of probabilities you want to get per pixel
-    model = UNet(n_channels=args.channels, n_classes=args.classes, img_size=args.img_size, bilinear=args.bilinear)
+    config_vit = CONFIGS[args.vit_name]
+    config_vit.n_classes = args.classes
+    config_vit.n_skip = args.n_skip
+    if args.vit_name.find('R50') != -1:
+        config_vit.patches.grid = (
+            int(args.img_size / args.vit_patches_size), int(args.img_size / args.vit_patches_size))
+    model = VisionTransformer(config_vit, img_size=args.img_size, n_classes=config_vit.n_classes, n_channels=args.channels)
+    # model = UNet(n_channels=args.channels, n_classes=args.classes, img_size=args.img_size, bilinear=args.bilinear)
     model = model.to(memory_format=torch.channels_last)
 
     logging.info(f'Network:\n'
                  f'\t{model.n_channels} input channels\n'
                  f'\t{model.n_classes} output channels (classes)\n'
-                 f'\t{"Bilinear" if model.bilinear else "Transposed conv"} upscaling')
+                 # f'\t{"Bilinear" if model.bilinear else "Transposed conv"} upscaling'
+                 )
 
     if args.load:
         state_dict = torch.load(args.load, map_location=device)
         # del state_dict['mask_values']
         model.load_state_dict(state_dict)
         logging.info(f'Model loaded from {args.load}')
+    # else:
+    #     model.load_from(weights=np.load(config_vit.pretrained_path))
+    #     logging.info(f'Model loaded from {config_vit.pretrained_path}')
 
     model.to(device=device)
     try:
@@ -249,4 +268,3 @@ if __name__ == '__main__':
             val_percent=args.val / 100,
             amp=args.amp
         )
-
