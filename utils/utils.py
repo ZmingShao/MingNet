@@ -22,17 +22,17 @@ def det_vis(img, mask, n_classes=2):
     return img
 
 
-def plot_img_and_mask(img, mask):
-    classes = mask.max() + 1
-    fig, ax = plt.subplots(1, classes)
-    ax[0].set_title('Input image')
-    ax[0].imshow(img)
-    ax[0].set_xticks([]), ax[0].set_yticks([])
-    for i in range(1, classes):
-        ax[i].set_title(f'Mask (class {i})')
-        ax[i].imshow(mask == i)
-        ax[i].set_xticks([]), ax[i].set_yticks([])
-    plt.show()
+# def plot_img_and_mask(img, mask):
+#     classes = mask.max() + 1
+#     fig, ax = plt.subplots(1, classes)
+#     ax[0].set_title('Input image')
+#     ax[0].imshow(img)
+#     ax[0].set_xticks([]), ax[0].set_yticks([])
+#     for i in range(1, classes):
+#         ax[i].set_title(f'Mask (class {i})')
+#         ax[i].imshow(mask == i)
+#         ax[i].set_xticks([]), ax[i].set_yticks([])
+#     plt.show()
 
 
 DATA_SET = {0: "Fluo-N2DH-SIM+",

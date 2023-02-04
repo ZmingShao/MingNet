@@ -12,7 +12,8 @@ from pathlib import Path
 
 from utils.data_loading import CTCDataset
 from networks.trans_unet import VisionTransformer, CONFIGS
-from utils.utils import plot_img_and_mask, DATA_SET, det_vis
+from networks.unet import UNet
+from utils.utils import DATA_SET, det_vis
 
 os.environ['NUMEXPR_MAX_THREADS'] = '16'
 
@@ -21,7 +22,7 @@ ds_name = DATA_SET[3]
 dir_img = Path('./data/train/' + ds_name + '/01')
 dir_seg = Path('./data/train/' + ds_name + '/01_ST/SEG')
 dir_track = Path('./data/train/' + ds_name + '/01_GT/TRA')
-dir_checkpoint = Path('./checkpoints/' + ds_name + '/w0.1_e10_bs2_lr1e-05_sz512_amp1')
+dir_checkpoint = Path('./checkpoints/' + ds_name + '/w0.0_e10_bs2_lr1e-05_sz512_amp1')
 
 
 def predict_img(net,
@@ -68,10 +69,8 @@ def get_args():
     parser.add_argument('--classes', '-c', type=int, default=2, help='Number of classes')
     parser.add_argument('--n-skip', type=int,
                         default=3, help='using number of skip-connect, default is num')
-    parser.add_argument('--vit-name', type=str,
+    parser.add_argument('--net-name', type=str,
                         default='R50-ViT-B_16', help='select one vit model')
-    parser.add_argument('--vit-patches-size', type=int,
-                        default=16, help='vit_patches_size, default is 16')
 
     return parser.parse_args()
 
@@ -107,18 +106,22 @@ if __name__ == '__main__':
     in_files = args.input
     out_files = get_output_filenames(args)
 
-    # net = UNet(n_channels=args.channels, n_classes=args.classes, img_size=args.img_size, bilinear=args.bilinear)
-    config_vit = CONFIGS[args.vit_name]
-    config_vit.n_classes = args.classes
-    config_vit.n_skip = args.n_skip
-    if args.vit_name.find('R50') != -1:
-        config_vit.patches.grid = (
-            int(args.img_size / args.vit_patches_size), int(args.img_size / args.vit_patches_size))
-    net = VisionTransformer(config_vit, img_size=args.img_size, n_classes=config_vit.n_classes,
-                            n_channels=args.channels)
+    if args.net_name == 'unet':
+        net = UNet(n_channels=args.channels, n_classes=args.classes, bilinear=args.bilinear)
+    else:
+        config_vit = CONFIGS[args.net_name]
+        config_vit.n_classes = args.classes
+        config_vit.n_skip = args.n_skip
+        if args.net_name.find('R50') != -1:
+            config_vit.patches.grid = (
+                int(args.img_size / 16), int(args.img_size / 16))
+        net = VisionTransformer(config_vit,
+                                img_size=args.img_size,
+                                n_classes=args.classes,
+                                n_channels=args.channels)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    logging.info(f'Loading model {args.model}')
+    logging.info(f'Loading model {dir_checkpoint / args.model}')
     logging.info(f'Using device {device}')
 
     net.to(device=device)

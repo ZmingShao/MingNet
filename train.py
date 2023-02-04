@@ -18,6 +18,7 @@ from tqdm import tqdm
 import wandb
 from evaluate import evaluate
 from networks.trans_unet import VisionTransformer, CONFIGS
+from networks.unet import UNet
 from utils.data_loading import CTCDataset
 from utils.dice_score import dice_loss
 from utils.utils import DATA_SET
@@ -28,7 +29,7 @@ dir_seg = Path('./data/train/' + ds_name + '/02_ST/SEG')
 dir_track = Path('./data/train/' + ds_name + '/02_GT/TRA')
 dir_checkpoint = Path('./checkpoints/' + ds_name)
 
-mtl_weight = 0.3  # w * SEG + (1-w) * DETs
+mtl_weight = 0.0  # w * SEG + (1-w) * DETs
 
 
 def train_model(
@@ -48,7 +49,8 @@ def train_model(
     # 1. Create dataset
     try:
         dataset = CTCDataset(dir_img, {'SEG': dir_seg, 'TRA': dir_track}, img_size, args.classes)
-    except (AssertionError, RuntimeError, IndexError):
+    except (AssertionError, RuntimeError, IndexError) as e:
+        logging.error(e)
         exit(-1)
 
     # 2. Split into train / validation partitions
@@ -159,7 +161,7 @@ def train_model(
                             experiment.log({
                                 'learning rate': optimizer.param_groups[0]['lr'],
                                 'validation Dice': val_score,
-                                'images': wandb.Image(images[0].cpu()),
+                                # 'images': wandb.Image(images[0].cpu()),
                                 # 'masks': {
                                 #     'true': wandb.Image(true_masks[0].float().cpu()),
                                 #     'pred': wandb.Image(masks_pred.argmax(dim=1)[0].float().cpu()),
@@ -197,10 +199,8 @@ def get_args():
     parser.add_argument('--classes', '-c', type=int, default=2, help='Number of classes')
     parser.add_argument('--n-skip', type=int,
                         default=3, help='using number of skip-connect, default is num')
-    parser.add_argument('--vit-name', type=str,
+    parser.add_argument('--net-name', type=str,
                         default='R50-ViT-B_16', help='select one vit model')
-    parser.add_argument('--vit-patches-size', type=int,
-                        default=16, help='vit_patches_size, default is 16')
 
     return parser.parse_args()
 
@@ -215,14 +215,19 @@ if __name__ == '__main__':
     # Change here to adapt to your data
     # n_channels=3 for RGB images
     # n_classes is the number of probabilities you want to get per pixel
-    config_vit = CONFIGS[args.vit_name]
-    config_vit.n_classes = args.classes
-    config_vit.n_skip = args.n_skip
-    if args.vit_name.find('R50') != -1:
-        config_vit.patches.grid = (
-            int(args.img_size / args.vit_patches_size), int(args.img_size / args.vit_patches_size))
-    model = VisionTransformer(config_vit, img_size=args.img_size, n_classes=config_vit.n_classes, n_channels=args.channels)
-    # model = UNet(n_channels=args.channels, n_classes=args.classes, img_size=args.img_size, bilinear=args.bilinear)
+    if args.net_name == 'unet':
+        model = UNet(n_channels=args.channels, n_classes=args.classes, bilinear=args.bilinear)
+    else:
+        config_vit = CONFIGS[args.net_name]
+        config_vit.n_classes = args.classes
+        config_vit.n_skip = args.n_skip
+        if args.net_name.find('R50') != -1:
+            config_vit.patches.grid = (
+                int(args.img_size / 16), int(args.img_size / 16))
+        model = VisionTransformer(config_vit,
+                                  img_size=args.img_size,
+                                  n_classes=args.classes,
+                                  n_channels=args.channels)
     model = model.to(memory_format=torch.channels_last)
 
     logging.info(f'Network:\n'

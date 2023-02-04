@@ -20,7 +20,8 @@ class UNet(nn.Module):
         self.up2 = (Up(512, 256 // factor, bilinear))
         self.up3 = (Up(256, 128 // factor, bilinear))
         self.up4 = (Up(128, 64, bilinear))
-        self.outc = (OutConv(64, n_classes))
+        self.outc_det = (OutConv(64, n_classes))
+        self.outc_seg = (OutConv(64, n_classes))
 
     def forward(self, x):
         x1 = self.inc(x)
@@ -32,8 +33,8 @@ class UNet(nn.Module):
         x = self.up2(x, x3)
         x = self.up3(x, x2)
         x = self.up4(x, x1)
-        logits = self.outc(x)
-        return logits
+        det_logits, seg_logits = self.outc_det(x), self.outc_seg(x)
+        return det_logits, seg_logits
 
     def use_checkpointing(self):
         self.inc = torch.utils.checkpoint(self.inc)

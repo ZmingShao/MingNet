@@ -154,7 +154,7 @@ class ResNetV2(nn.Module):
             right_size = int(in_size / 4 / (i + 1))
             if x.size()[2] != right_size:
                 pad = right_size - x.size()[2]
-                assert pad < 3 and pad > 0, "x {} should {}".format(x.size(), right_size)
+                assert 3 > pad > 0, "x {} should {}".format(x.size(), right_size)
                 feat = torch.zeros((b, x.size()[1], right_size, right_size), device=x.device)
                 feat[:, :, 0:x.size()[2], 0:x.size()[3]] = x[:]
             else:
