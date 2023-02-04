@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 import wandb
 from evaluate import evaluate
-from networks.transunet import VisionTransformer, CONFIGS
+from networks.trans_unet import VisionTransformer, CONFIGS
 from utils.data_loading import CTCDataset
 from utils.dice_score import dice_loss
 from utils.utils import DATA_SET
@@ -28,7 +28,7 @@ dir_seg = Path('./data/train/' + ds_name + '/02_ST/SEG')
 dir_track = Path('./data/train/' + ds_name + '/02_GT/TRA')
 dir_checkpoint = Path('./checkpoints/' + ds_name)
 
-mtl_weight = 0.1  # w * SEG + (1-w) * DETs
+mtl_weight = 0.3  # w * SEG + (1-w) * DETs
 
 
 def train_model(
