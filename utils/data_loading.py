@@ -186,7 +186,6 @@ class CTCDataset(Dataset):
             #         # cv2.drawContours(det_mask, cnts, i, 50, 1)
             # img = np.stack((seg_mask, det_mask), axis=0)
         else:
-            img = cv2.resize(img, (img_size, img_size), interpolation=cv2.INTER_CUBIC)
             if img.ndim == 2:
                 img = img[np.newaxis, ...]
             else:
