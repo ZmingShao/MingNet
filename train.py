@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 import wandb
 from evaluate import evaluate
-from networks import VisionTransformer, CONFIGS
+from networks.transunet import VisionTransformer, CONFIGS
 from utils.data_loading import CTCDataset
 from utils.dice_score import dice_loss
 from utils.utils import DATA_SET

@@ -11,7 +11,7 @@ import tifffile
 from pathlib import Path
 
 from utils.data_loading import CTCDataset
-from networks import VisionTransformer, CONFIGS
+from networks.transunet import VisionTransformer, CONFIGS
 from utils.utils import plot_img_and_mask, DATA_SET, det_vis
 
 os.environ['NUMEXPR_MAX_THREADS'] = '16'
