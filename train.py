@@ -17,19 +17,21 @@ from tqdm import tqdm
 
 import wandb
 from evaluate import evaluate
-from networks.trans_unet import VisionTransformer, CONFIGS
-from networks.unet import UNet
 from utils.data_loading import CTCDataset
 from utils.dice_score import dice_loss
 from utils.utils import DATA_SET
 
-ds_name = DATA_SET[3]
+from networks.trans_unet import VisionTransformer, CONFIGS as CONFIGS_vit
+from networks.unet import UNet
+from networks.swin_unet import SwinUnet, get_config as get_config_swin
+
+ds_name, radius = DATA_SET[3]
 dir_img = Path('./data/train/' + ds_name + '/02')
 dir_seg = Path('./data/train/' + ds_name + '/02_ST/SEG')
 dir_track = Path('./data/train/' + ds_name + '/02_GT/TRA')
 dir_checkpoint = Path('./checkpoints/' + ds_name)
 
-mtl_weight = 0.0  # w * SEG + (1-w) * DETs
+mtl_weight = 0.4  # w * SEG + (1-w) * DETs
 
 
 def train_model(
@@ -48,7 +50,7 @@ def train_model(
 ):
     # 1. Create dataset
     try:
-        dataset = CTCDataset(dir_img, {'SEG': dir_seg, 'TRA': dir_track}, img_size, args.classes)
+        dataset = CTCDataset(dir_img, {'SEG': dir_seg, 'TRA': dir_track}, img_size, args.classes, radius=radius)
     except (AssertionError, RuntimeError, IndexError) as e:
         logging.error(e)
         exit(-1)
@@ -85,6 +87,7 @@ def train_model(
     # 4. Set up the optimizer, the loss, the learning rate scheduler and the loss scaling for AMP
     optimizer = optim.RMSprop(model.parameters(),
                               lr=learning_rate, weight_decay=weight_decay, momentum=momentum, foreach=True)
+    # optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9, weight_decay=0.0001)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
     criterion = nn.CrossEntropyLoss() if model.n_classes > 1 else nn.BCEWithLogitsLoss()
@@ -197,8 +200,8 @@ def get_args():
     parser.add_argument('--bilinear', action='store_true', default=False, help='Use bilinear upsampling')
     parser.add_argument('--channels', type=int, default=1, help='Number of channels; channels=3 for RGB images')
     parser.add_argument('--classes', '-c', type=int, default=2, help='Number of classes')
-    parser.add_argument('--n-skip', type=int,
-                        default=3, help='using number of skip-connect, default is num')
+    # parser.add_argument('--n-skip', type=int,
+    #                     default=3, help='using number of skip-connect, default is num')
     parser.add_argument('--net-name', type=str,
                         default='R50-ViT-B_16', help='select one vit model')
 
@@ -217,10 +220,11 @@ if __name__ == '__main__':
     # n_classes is the number of probabilities you want to get per pixel
     if args.net_name == 'unet':
         model = UNet(n_channels=args.channels, n_classes=args.classes, bilinear=args.bilinear)
-    else:
-        config_vit = CONFIGS[args.net_name]
+    elif args.net_name == 'trans_unet':
+        args.net_name = 'R50-ViT-B_16'
+        config_vit = CONFIGS_vit[args.net_name]
         config_vit.n_classes = args.classes
-        config_vit.n_skip = args.n_skip
+        config_vit.n_skip = 3
         if args.net_name.find('R50') != -1:
             config_vit.patches.grid = (
                 int(args.img_size / 16), int(args.img_size / 16))
@@ -228,6 +232,13 @@ if __name__ == '__main__':
                                   img_size=args.img_size,
                                   n_classes=args.classes,
                                   n_channels=args.channels)
+    elif args.net_name == 'swin_unet':
+        args.cfg = 'networks/swin_unet/swin_tiny_patch4_window7_224_lite.yaml'
+        config_swin = get_config_swin(args)
+        model = SwinUnet(config_swin, args.img_size, args.classes, args.channels)
+    else:
+        logging.error('Model not found!')
+        exit(-1)
     model = model.to(memory_format=torch.channels_last)
 
     logging.info(f'Network:\n'

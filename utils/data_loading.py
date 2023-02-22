@@ -133,13 +133,14 @@ def cnt_center(cnt: List[tuple]):
 
 
 class CTCDataset(Dataset):
-    def __init__(self, images_dir, masks_dir, img_size=224, n_classes=2):
+    def __init__(self, images_dir, masks_dir, img_size=224, n_classes=2, radius=3):
         self.images_dir = Path(images_dir)
         self.seg_dir = Path(masks_dir['SEG'])
         self.track_dir = Path(masks_dir['TRA'])
         self.n_classes = n_classes
         # self.mask_values = [int(v / (n_classes - 1) * 255) for v in range(n_classes)] if n_classes > 1 else [255]
         self.img_size = img_size
+        self.radius = radius
 
         self.ids = [splitext(str(file))[0] for file in listdir(images_dir) if not str(file).startswith('.')]
         if not self.ids:
@@ -150,19 +151,19 @@ class CTCDataset(Dataset):
         return len(self.ids)
 
     @staticmethod
-    def preprocess(img: np.ndarray, img_size: int, is_mask: bool):
+    def preprocess(img: np.ndarray, img_size: int, is_mask: bool, radius=3):
         if img_size > 0:
             img = cv2.resize(img, (img_size, img_size),
                              interpolation=cv2.INTER_NEAREST if is_mask else cv2.INTER_CUBIC)
         if is_mask:
             img = 255 * np.uint8(img > 0)
-            img = img.transpose((2, 0, 1)) / 255.0
-            # seg_bin, tra_bin = img[..., 0], img[..., 1]
-            # cnts, _ = cv2.findContours(tra_bin, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-            # det_bin = np.zeros_like(tra_bin)
-            # for cnt in cnts:
-            #     center = cnt_center(cnt)
-            #     cv2.circle(det_bin, center, 1, 255, -1)
+            # img = img.transpose((2, 0, 1)) / 255.0
+            seg_bin, tra_bin = img[..., 0], img[..., 1]
+            cnts, _ = cv2.findContours(tra_bin, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+            det_bin = np.zeros_like(tra_bin)
+            for cnt in cnts:
+                center = cnt_center(cnt)
+                cv2.circle(det_bin, center, radius, 255, -1)
             # diff = cv2.absdiff(det_bin, seg_bin)
             # cnts, hier = cv2.findContours(diff, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
             # hier = np.squeeze(hier)
@@ -174,17 +175,18 @@ class CTCDataset(Dataset):
             #         next_child = hier[first_child, 0]
             #         ct_first, ct_next = cnt_center(cnts[first_child]), cnt_center(cnts[next_child])
             #         if next_child == -1:
-            #             cv2.circle(det_mask, ct_first, 3, 1, -1)
+            #             cv2.circle(det_mask, ct_first, radius, 1, -1)
             #             # cv2.drawContours(det_mask, cnts, first_child, 1, -1)
             #             cv2.drawContours(seg_mask, cnts, i, 1, -1)
             #         else:
-            #             cv2.circle(det_mask, ct_first, 3, 2, -1)
-            #             cv2.circle(det_mask, ct_next, 3, 2, -1)
+            #             cv2.circle(det_mask, ct_first, radius, 1, -1)
+            #             cv2.circle(det_mask, ct_next, radius, 1, -1)
             #             # cv2.drawContours(det_mask, cnts, first_child, 2, -1)
             #             # cv2.drawContours(det_mask, cnts, next_child, 2, -1)
             #             cv2.drawContours(seg_mask, cnts, i, 1, -1)
             #         # cv2.drawContours(det_mask, cnts, i, 50, 1)
-            # img = np.stack((seg_mask, det_mask), axis=0)
+            img = np.stack((seg_bin, det_bin), axis=0)
+            img = np.uint8(img / 255)
         else:
             if img.ndim == 2:
                 img = img[np.newaxis, ...]
@@ -213,8 +215,8 @@ class CTCDataset(Dataset):
             f'Image and mask {name} should be the same shape, ' \
             f'but are image:{img.shape} and mask:{seg_mask.shape}, {track_mask.shape}'
 
-        img = self.preprocess(img, self.img_size, is_mask=False)
-        mask = self.preprocess(mask, self.img_size, is_mask=True)
+        img = self.preprocess(img, self.img_size, is_mask=False, radius=self.radius)
+        mask = self.preprocess(mask, self.img_size, is_mask=True, radius=self.radius)
 
         return {
             'image': torch.as_tensor(img.copy()).float().contiguous(),

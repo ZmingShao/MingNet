@@ -1,9 +1,20 @@
 matplotlib~=3.5.3
 numpy~=1.21.5
 Pillow~=9.3.0
-torch~=1.9.1
-torchvision~=0.10.1
+# torch~=1.9.1
+# torchvision~=0.10.1
 tqdm~=4.64.1
 wandb~=0.13.5
 tifffile~=2021.7.2
 opencv-python~=4.5.5.64
+ml-collections
+medpy
+SimpleITK
+scipy~=1.7.3
+h5py
+timm~=0.6.12
+einops~=0.6.0
+torch~=1.13.1
+PyYAML~=6.0
+yacs~=0.1.8
+torchvision~=0.14.1
