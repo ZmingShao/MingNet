@@ -7,9 +7,9 @@ import sys
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torchvision.transforms as transforms
-import torchvision.transforms.functional as TF
+# import torch.nn.functional as F
+# import torchvision.transforms as transforms
+# import torchvision.transforms.functional as TF
 from pathlib import Path
 from torch import optim
 from torch.utils.data import DataLoader, random_split
@@ -18,12 +18,14 @@ from tqdm import tqdm
 import wandb
 from evaluate import evaluate
 from utils.data_loading import CTCDataset
-from utils.dice_score import dice_loss
+# from utils.dice_score import dice_loss
+from utils.loss import MultiTaskLoss
 from utils.utils import DATA_SET
 
 from networks.trans_unet import VisionTransformer, CONFIGS as CONFIGS_vit
 from networks.unet import UNet
 from networks.swin_unet import SwinUnet, get_config as get_config_swin
+from networks.unet_plus_plus import Generic_UNetPlusPlus, softmax_helper
 
 ds_name, radius = DATA_SET[3]
 dir_img = Path('./data/train/' + ds_name + '/02')
@@ -31,7 +33,7 @@ dir_seg = Path('./data/train/' + ds_name + '/02_ST/SEG')
 dir_track = Path('./data/train/' + ds_name + '/02_GT/TRA')
 dir_checkpoint = Path('./checkpoints/' + ds_name)
 
-mtl_weight = 0.4  # w * SEG + (1-w) * DETs
+mtl_weight = 1.0  # w * SEG + (1-w) * DETs
 
 
 def train_model(
@@ -90,7 +92,9 @@ def train_model(
     # optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9, weight_decay=0.0001)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
-    criterion = nn.CrossEntropyLoss() if model.n_classes > 1 else nn.BCEWithLogitsLoss()
+    # criterion = nn.CrossEntropyLoss() if model.n_classes > 1 else nn.BCEWithLogitsLoss()
+    det_loss_fn = MultiTaskLoss(model.n_classes, task='DET')
+    seg_loss_fn = MultiTaskLoss(model.n_classes, task='SEG')
     global_step = 0
 
     # 5. Begin training
@@ -112,17 +116,19 @@ def train_model(
                 with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
                     pred_det, pred_seg = model(images)
                     mask_seg, mask_det = true_masks[:, 0, ...], true_masks[:, 1, ...]
-                    if model.n_classes == 1:
-                        loss_det = criterion(pred_det.squeeze(1), mask_det.float())
-                        loss_seg = 0.5 * criterion(pred_seg.squeeze(1), mask_seg.float()) + 0.5 * dice_loss(
-                            F.sigmoid(pred_seg.squeeze(1)), mask_seg.float(), multiclass=False)
-                    else:
-                        loss_det = criterion(pred_det, mask_det)
-                        loss_seg = 0.5 * criterion(pred_seg, mask_seg) + 0.5 * dice_loss(
-                            F.softmax(pred_seg, dim=1).float(),
-                            F.one_hot(mask_seg, model.n_classes).permute(0, 3, 1, 2).float(),
-                            multiclass=True
-                        )
+                    # if model.n_classes == 1:
+                    #     loss_det = criterion(pred_det.squeeze(1), mask_det.float())
+                    #     loss_seg = 0.5 * criterion(pred_seg.squeeze(1), mask_seg.float()) + 0.5 * dice_loss(
+                    #         F.sigmoid(pred_seg.squeeze(1)), mask_seg.float(), multiclass=False)
+                    # else:
+                    #     loss_det = criterion(pred_det, mask_det)
+                    #     loss_seg = 0.5 * criterion(pred_seg, mask_seg) + 0.5 * dice_loss(
+                    #         F.softmax(pred_seg, dim=1).float(),
+                    #         F.one_hot(mask_seg, model.n_classes).permute(0, 3, 1, 2).float(),
+                    #         multiclass=True
+                    #     )
+                    loss_det = det_loss_fn(pred_det, mask_det)
+                    loss_seg = seg_loss_fn(pred_seg, mask_seg)
                     loss = (1 - mtl_weight) * loss_det + mtl_weight * loss_seg
 
                 optimizer.zero_grad(set_to_none=True)
@@ -236,6 +242,20 @@ if __name__ == '__main__':
         args.cfg = 'networks/swin_unet/swin_tiny_patch4_window7_224_lite.yaml'
         config_swin = get_config_swin(args)
         model = SwinUnet(config_swin, args.img_size, args.classes, args.channels)
+    elif args.net_name == 'unet_pp':
+        dropout_op = nn.Dropout2d
+        norm_op = nn.InstanceNorm2d
+        norm_op_kwargs = {'eps': 1e-5, 'affine': True}
+        dropout_op_kwargs = {'p': 0, 'inplace': True}
+        net_nonlin = nn.LeakyReLU
+        net_nonlin_kwargs = {'negative_slope': 1e-2, 'inplace': True}
+        base_num_features, num_pool = 30, 5
+        model = Generic_UNetPlusPlus(args.channels, base_num_features, args.classes, num_pool, norm_op=norm_op,
+                                     norm_op_kwargs=norm_op_kwargs, dropout_op=dropout_op,
+                                     dropout_op_kwargs=dropout_op_kwargs, nonlin=net_nonlin,
+                                     nonlin_kwargs=net_nonlin_kwargs, final_nonlin=lambda x: x,
+                                     convolutional_pooling=True, convolutional_upsampling=True)
+        model.inference_apply_nonlin = softmax_helper
     else:
         logging.error('Model not found!')
         exit(-1)

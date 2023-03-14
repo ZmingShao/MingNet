@@ -22,6 +22,8 @@ def evaluate(net, dataloader, device, amp):
 
             # predict the mask
             _, mask_pred = net(image)
+            if isinstance(mask_pred, (tuple, list)):
+                mask_pred = mask_pred[0]
 
             if net.n_classes == 1:
                 assert mask_true.min() >= 0 and mask_true.max() <= 1, 'True mask indices should be in [0, 1]'

@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import cv2
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from PIL import Image
 import tifffile
@@ -14,16 +15,18 @@ from utils.data_loading import CTCDataset
 from networks.trans_unet import VisionTransformer, CONFIGS as CONFIGS_vit
 from networks.unet import UNet
 from networks.swin_unet import SwinUnet, get_config as get_config_swin
+from networks.unet_plus_plus import Generic_UNetPlusPlus, softmax_helper
+
 from utils.utils import DATA_SET, det_vis
 
 os.environ['NUMEXPR_MAX_THREADS'] = '16'
 
 ds_name, radius = DATA_SET[3]
 # dir_img = Path('./data/test/' + ds_name + '/02')
-dir_img = Path('./data/train/' + ds_name + '/02')
-dir_seg = Path('./data/train/' + ds_name + '/02_ST/SEG')
-dir_track = Path('./data/train/' + ds_name + '/02_GT/TRA')
-dir_checkpoint = Path('./checkpoints/' + ds_name + '/w0.4_e10_bs2_lr1e-05_sz512_amp1')
+dir_img = Path('./data/train/' + ds_name + '/01')
+dir_seg = Path('./data/train/' + ds_name + '/01_ST/SEG')
+dir_track = Path('./data/train/' + ds_name + '/01_GT/TRA')
+dir_checkpoint = Path('./checkpoints/' + ds_name + '/w1.0_e10_bs4_lr1e-05_sz512_amp1')
 
 
 def predict_img(net,
@@ -39,12 +42,20 @@ def predict_img(net,
     with torch.no_grad():
         outputs = net(img)
         # DET
-        output = outputs[0].cpu()
+        output = outputs[0]
+        if isinstance(output, (tuple, list)):
+            output = output[0].cpu()
+        else:
+            output = output.cpu()
         output = F.interpolate(output, full_img.shape[:2], mode='bilinear')
         mask_pred = output.argmax(dim=1) if net.n_classes > 1 else torch.sigmoid(output) > out_threshold
         mask_pred_det = mask_pred[0].long().squeeze().numpy()
         # SEG
-        output = outputs[1].cpu()
+        output = outputs[1]
+        if isinstance(output, (tuple, list)):
+            output = output[0].cpu()
+        else:
+            output = output.cpu()
         output = F.interpolate(output, full_img.shape[:2], mode='bilinear')
         mask_pred = output.argmax(dim=1) if net.n_classes > 1 else torch.sigmoid(output) > out_threshold
         mask_pred_seg = mask_pred[0].long().squeeze().numpy()
@@ -126,6 +137,20 @@ if __name__ == '__main__':
         args.cfg = 'networks/swin_unet/swin_tiny_patch4_window7_224_lite.yaml'
         config_swin = get_config_swin(args)
         net = SwinUnet(config_swin, args.img_size, args.classes, args.channels)
+    elif args.net_name == 'unet_pp':
+        dropout_op = nn.Dropout2d
+        norm_op = nn.InstanceNorm2d
+        norm_op_kwargs = {'eps': 1e-5, 'affine': True}
+        dropout_op_kwargs = {'p': 0, 'inplace': True}
+        net_nonlin = nn.LeakyReLU
+        net_nonlin_kwargs = {'negative_slope': 1e-2, 'inplace': True}
+        base_num_features, num_pool = 30, 5
+        net = Generic_UNetPlusPlus(args.channels, base_num_features, args.classes, num_pool, norm_op=norm_op,
+                                   norm_op_kwargs=norm_op_kwargs, dropout_op=dropout_op,
+                                   dropout_op_kwargs=dropout_op_kwargs, nonlin=net_nonlin,
+                                   nonlin_kwargs=net_nonlin_kwargs, final_nonlin=lambda x: x,
+                                   convolutional_pooling=True, convolutional_upsampling=True)
+        net.inference_apply_nonlin = softmax_helper
     else:
         logging.error('Model not found!')
         exit(-1)
@@ -161,11 +186,6 @@ if __name__ == '__main__':
         # DET
         det_mask_pred = mask_to_image(det_mask_pred, mask_values)
         result_pred = det_vis(img, det_mask_pred, args.classes, radius=radius)
-        # plt.figure(1)
-        # plt.imshow(det_mask_pred)
-        # plt.figure(2)
-        # plt.imshow(result_pred)
-        # plt.show()
 
         det_mask = mask_to_image(det_mask, mask_values)
         result_true = det_vis(img, det_mask, args.classes, radius=radius)
@@ -198,6 +218,10 @@ if __name__ == '__main__':
         if args.viz:
             logging.info(f'Visualizing results for image {filename}, close to continue...')
             # plot_img_and_mask(img, mask)
-            plt.imshow(result)
+            plt.figure(1)
+            plt.imshow(det_mask_pred)
+            plt.figure(2)
+            plt.imshow(result_pred)
+            # plt.imshow(result)
             plt.xticks([]), plt.yticks([])
             plt.show()
