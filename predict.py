@@ -12,12 +12,7 @@ import tifffile
 from pathlib import Path
 
 from utils.data_loading import CTCDataset
-from networks.trans_unet import VisionTransformer, CONFIGS as CONFIGS_vit
-from networks.unet import UNet
-from networks.swin_unet import SwinUnet, get_config as get_config_swin
-from networks.unet_plus_plus import Generic_UNetPlusPlus, softmax_helper
-
-from utils.utils import DATA_SET, det_vis
+from utils.utils import DATA_SET, det_vis, select_model
 
 os.environ['NUMEXPR_MAX_THREADS'] = '16'
 
@@ -119,41 +114,7 @@ if __name__ == '__main__':
     in_files = args.input
     out_files = get_output_filenames(args)
 
-    if args.net_name == 'unet':
-        net = UNet(n_channels=args.channels, n_classes=args.classes, bilinear=args.bilinear)
-    elif args.net_name == 'trans_unet':
-        args.net_name = 'R50-ViT-B_16'
-        config_vit = CONFIGS_vit[args.net_name]
-        config_vit.n_classes = args.classes
-        config_vit.n_skip = 3
-        if args.net_name.find('R50') != -1:
-            config_vit.patches.grid = (
-                int(args.img_size / 16), int(args.img_size / 16))
-        net = VisionTransformer(config_vit,
-                                img_size=args.img_size,
-                                n_classes=args.classes,
-                                n_channels=args.channels)
-    elif args.net_name == 'swin_unet':
-        args.cfg = 'networks/swin_unet/swin_tiny_patch4_window7_224_lite.yaml'
-        config_swin = get_config_swin(args)
-        net = SwinUnet(config_swin, args.img_size, args.classes, args.channels)
-    elif args.net_name == 'unet_pp':
-        dropout_op = nn.Dropout2d
-        norm_op = nn.InstanceNorm2d
-        norm_op_kwargs = {'eps': 1e-5, 'affine': True}
-        dropout_op_kwargs = {'p': 0, 'inplace': True}
-        net_nonlin = nn.LeakyReLU
-        net_nonlin_kwargs = {'negative_slope': 1e-2, 'inplace': True}
-        base_num_features, num_pool = 30, 5
-        net = Generic_UNetPlusPlus(args.channels, base_num_features, args.classes, num_pool, norm_op=norm_op,
-                                   norm_op_kwargs=norm_op_kwargs, dropout_op=dropout_op,
-                                   dropout_op_kwargs=dropout_op_kwargs, nonlin=net_nonlin,
-                                   nonlin_kwargs=net_nonlin_kwargs, final_nonlin=lambda x: x,
-                                   convolutional_pooling=True, convolutional_upsampling=True)
-        net.inference_apply_nonlin = softmax_helper
-    else:
-        logging.error('Model not found!')
-        exit(-1)
+    net = select_model(args)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logging.info(f'Loading model {dir_checkpoint / args.model}')
@@ -185,10 +146,10 @@ if __name__ == '__main__':
 
         # DET
         det_mask_pred = mask_to_image(det_mask_pred, mask_values)
-        result_pred = det_vis(img, det_mask_pred, args.classes, radius=radius)
+        result_pred = det_vis(img, det_mask_pred, mask_values, radius=radius)
 
         det_mask = mask_to_image(det_mask, mask_values)
-        result_true = det_vis(img, det_mask, args.classes, radius=radius)
+        result_true = det_vis(img, det_mask, mask_values, radius=radius)
 
         result_det = np.hstack((result_true, result_pred))
 
@@ -206,22 +167,23 @@ if __name__ == '__main__':
         result_seg = cv2.cvtColor(result_seg, cv2.COLOR_GRAY2RGB)
 
         # RESULT
-        result_arr = np.vstack((result_det, result_seg))
-        result_arr = np.asarray(result_arr, dtype='u1')
-        result = Image.fromarray(result_arr)
+        result = np.vstack((result_det, result_seg))
+        # result = np.asarray(result, dtype='u1')
+        # result = Image.fromarray(result_arr)
 
         if not args.no_save:
             out_filename = out_files[i]
-            result.save(out_filename)
+            # result.save(out_filename)
+            cv2.imwrite(out_filename, result)
             logging.info(f'Mask saved to {out_filename}')
 
         if args.viz:
             logging.info(f'Visualizing results for image {filename}, close to continue...')
             # plot_img_and_mask(img, mask)
-            plt.figure(1)
-            plt.imshow(det_mask_pred)
-            plt.figure(2)
-            plt.imshow(result_pred)
-            # plt.imshow(result)
+            # plt.figure(1)
+            # plt.imshow(det_mask_pred)
+            # plt.figure(2)
+            # plt.imshow(result_pred)
+            plt.imshow(result)
             plt.xticks([]), plt.yticks([])
             plt.show()

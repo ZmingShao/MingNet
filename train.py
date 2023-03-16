@@ -20,12 +20,7 @@ from evaluate import evaluate
 from utils.data_loading import CTCDataset
 # from utils.dice_score import dice_loss
 from utils.loss import MultiTaskLoss
-from utils.utils import DATA_SET
-
-from networks.trans_unet import VisionTransformer, CONFIGS as CONFIGS_vit
-from networks.unet import UNet
-from networks.swin_unet import SwinUnet, get_config as get_config_swin
-from networks.unet_plus_plus import Generic_UNetPlusPlus, softmax_helper
+from utils.utils import DATA_SET, select_model
 
 ds_name, radius = DATA_SET[3]
 dir_img = Path('./data/train/' + ds_name + '/02')
@@ -154,13 +149,13 @@ def train_model(
                 division_step = (n_train // (5 * batch_size))
                 if division_step > 0:
                     if global_step % division_step == 0:
-                        # histograms = {}
-                        # for tag, value in net.named_parameters():
-                        #     tag = tag.replace('/', '.')
-                        #     if not torch.isinf(value).any():
-                        #         histograms['Weights/' + tag] = wandb.Histogram(value.data.cpu())
-                        #     if not torch.isinf(value.grad).any():
-                        #         histograms['Gradients/' + tag] = wandb.Histogram(value.grad.data.cpu())
+                        histograms = {}
+                        for tag, value in model.named_parameters():
+                            tag = tag.replace('/', '.')
+                            if not (torch.isinf(value) | torch.isnan(value)).any():
+                                histograms['Weights/' + tag] = wandb.Histogram(value.data.cpu())
+                            if not (torch.isinf(value.grad) | torch.isnan(value.grad)).any():
+                                histograms['Gradients/' + tag] = wandb.Histogram(value.grad.data.cpu())
 
                         val_score = evaluate(model, val_loader, device, amp)
                         scheduler.step(val_score)
@@ -170,20 +165,22 @@ def train_model(
                             experiment.log({
                                 'learning rate': optimizer.param_groups[0]['lr'],
                                 'validation Dice': val_score,
-                                # 'images': wandb.Image(images[0].cpu()),
-                                # 'masks': {
-                                #     'true': wandb.Image(true_masks[0].float().cpu()),
-                                #     'pred': wandb.Image(masks_pred.argmax(dim=1)[0].float().cpu()),
-                                # },
+                                'images': wandb.Image(images[0].cpu()),
+                                'masks': {
+                                    'true_seg': wandb.Image(mask_seg[0].float().cpu()),
+                                    'true_det': wandb.Image(mask_det[0].float().cpu()),
+                                    'pred_seg': wandb.Image(pred_seg.argmax(dim=1)[0].float().cpu()),
+                                    'pred_det': wandb.Image(pred_det.argmax(dim=1)[0].float().cpu()),
+                                },
                                 'step': global_step,
                                 'epoch': epoch,
-                                # **histograms
+                                **histograms
                             })
                         except:
                             pass
 
         if save_checkpoint:
-            dir_pth = dir_checkpoint / f'w{mtl_weight:.1f}_e{epochs}_bs{batch_size}' \
+            dir_pth = dir_checkpoint / f'{args.net_name}_w{mtl_weight:.1f}_e{epochs}_bs{batch_size}' \
                                        f'_lr{learning_rate}_sz{img_size}_amp{int(amp)}'
             Path(dir_pth).mkdir(parents=True, exist_ok=True)
             state_dict = model.state_dict()
@@ -206,10 +203,7 @@ def get_args():
     parser.add_argument('--bilinear', action='store_true', default=False, help='Use bilinear upsampling')
     parser.add_argument('--channels', type=int, default=1, help='Number of channels; channels=3 for RGB images')
     parser.add_argument('--classes', '-c', type=int, default=2, help='Number of classes')
-    # parser.add_argument('--n-skip', type=int,
-    #                     default=3, help='using number of skip-connect, default is num')
-    parser.add_argument('--net-name', type=str,
-                        default='R50-ViT-B_16', help='select one vit model')
+    parser.add_argument('--net-name', type=str, default='unet', help='select one model')
 
     return parser.parse_args()
 
@@ -221,44 +215,7 @@ if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logging.info(f'Using device {device}')
 
-    # Change here to adapt to your data
-    # n_channels=3 for RGB images
-    # n_classes is the number of probabilities you want to get per pixel
-    if args.net_name == 'unet':
-        model = UNet(n_channels=args.channels, n_classes=args.classes, bilinear=args.bilinear)
-    elif args.net_name == 'trans_unet':
-        args.net_name = 'R50-ViT-B_16'
-        config_vit = CONFIGS_vit[args.net_name]
-        config_vit.n_classes = args.classes
-        config_vit.n_skip = 3
-        if args.net_name.find('R50') != -1:
-            config_vit.patches.grid = (
-                int(args.img_size / 16), int(args.img_size / 16))
-        model = VisionTransformer(config_vit,
-                                  img_size=args.img_size,
-                                  n_classes=args.classes,
-                                  n_channels=args.channels)
-    elif args.net_name == 'swin_unet':
-        args.cfg = 'networks/swin_unet/swin_tiny_patch4_window7_224_lite.yaml'
-        config_swin = get_config_swin(args)
-        model = SwinUnet(config_swin, args.img_size, args.classes, args.channels)
-    elif args.net_name == 'unet_pp':
-        dropout_op = nn.Dropout2d
-        norm_op = nn.InstanceNorm2d
-        norm_op_kwargs = {'eps': 1e-5, 'affine': True}
-        dropout_op_kwargs = {'p': 0, 'inplace': True}
-        net_nonlin = nn.LeakyReLU
-        net_nonlin_kwargs = {'negative_slope': 1e-2, 'inplace': True}
-        base_num_features, num_pool = 30, 5
-        model = Generic_UNetPlusPlus(args.channels, base_num_features, args.classes, num_pool, norm_op=norm_op,
-                                     norm_op_kwargs=norm_op_kwargs, dropout_op=dropout_op,
-                                     dropout_op_kwargs=dropout_op_kwargs, nonlin=net_nonlin,
-                                     nonlin_kwargs=net_nonlin_kwargs, final_nonlin=lambda x: x,
-                                     convolutional_pooling=True, convolutional_upsampling=True)
-        model.inference_apply_nonlin = softmax_helper
-    else:
-        logging.error('Model not found!')
-        exit(-1)
+    model = select_model(args)
     model = model.to(memory_format=torch.channels_last)
 
     logging.info(f'Network:\n'
