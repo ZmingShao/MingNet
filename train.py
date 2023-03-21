@@ -28,8 +28,6 @@ dir_seg = Path('./data/train/' + ds_name + '/02_ST/SEG')
 dir_track = Path('./data/train/' + ds_name + '/02_GT/TRA')
 dir_checkpoint = Path('./checkpoints/' + ds_name)
 
-mtl_weight = 1.0  # w * SEG + (1-w) * DETs
-
 
 def train_model(
         model,
@@ -44,6 +42,8 @@ def train_model(
         weight_decay: float = 1e-8,
         momentum: float = 0.999,
         gradient_clipping: float = 1.0,
+        net_name: str = 'unet',
+        mtl_weight: float = 0.5
 ):
     # 1. Create dataset
     try:
@@ -98,7 +98,7 @@ def train_model(
         epoch_loss = 0
         with tqdm(total=n_train, desc=f'Epoch {epoch}/{epochs}', unit='img') as pbar:
             for batch in train_loader:
-                images, true_masks = batch['image'], batch['mask']
+                images, mask_det, mask_seg = batch['image'], batch['det_mask'], batch['seg_mask']
 
                 assert images.shape[1] == model.n_channels, \
                     f'Network has been defined with {model.n_channels} input channels, ' \
@@ -106,11 +106,12 @@ def train_model(
                     'the images are loaded correctly.'
 
                 images = images.to(device=device, dtype=torch.float32, memory_format=torch.channels_last)
-                true_masks = true_masks.to(device=device, dtype=torch.long)
+                mask_det = mask_det.to(device=device, dtype=torch.float32)
+                mask_seg = mask_seg.to(device=device, dtype=torch.long)
 
                 with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
                     pred_det, pred_seg = model(images)
-                    mask_seg, mask_det = true_masks[:, 0, ...], true_masks[:, 1, ...]
+                    # mask_seg, mask_det = true_masks[:, 0, ...], true_masks[:, 1, ...]
                     # if model.n_classes == 1:
                     #     loss_det = criterion(pred_det.squeeze(1), mask_det.float())
                     #     loss_seg = 0.5 * criterion(pred_seg.squeeze(1), mask_seg.float()) + 0.5 * dice_loss(
@@ -180,7 +181,7 @@ def train_model(
                             pass
 
         if save_checkpoint:
-            dir_pth = dir_checkpoint / f'{args.net_name}_w{mtl_weight:.1f}_e{epochs}_bs{batch_size}' \
+            dir_pth = dir_checkpoint / f'{net_name}_w{mtl_weight:.1f}_e{epochs}_bs{batch_size}' \
                                        f'_lr{learning_rate}_sz{img_size}_amp{int(amp)}'
             Path(dir_pth).mkdir(parents=True, exist_ok=True)
             state_dict = model.state_dict()
@@ -204,6 +205,8 @@ def get_args():
     parser.add_argument('--channels', type=int, default=1, help='Number of channels; channels=3 for RGB images')
     parser.add_argument('--classes', '-c', type=int, default=2, help='Number of classes')
     parser.add_argument('--net-name', type=str, default='unet', help='select one model')
+    parser.add_argument('--mtl-weight', type=float, default=0.5,
+                        help='Weight of multi-task loss: w * SEG + (1-w) * DET')
 
     return parser.parse_args()
 
@@ -243,7 +246,9 @@ if __name__ == '__main__':
             device=device,
             img_size=args.img_size,
             val_percent=args.val / 100,
-            amp=args.amp
+            amp=args.amp,
+            net_name=args.net_name,
+            mtl_weight=args.mtl_weight
         )
     except torch.cuda.OutOfMemoryError:
         logging.error('Detected OutOfMemoryError! '

@@ -47,7 +47,7 @@ def select_model(args):
         model = UNet(n_channels=args.channels, n_classes=args.classes, bilinear=args.bilinear)
     elif args.net_name == 'trans_unet':
         net_name = 'R50-ViT-B_16'
-        config_vit = CONFIGS_vit[args.net_name]
+        config_vit = CONFIGS_vit[net_name]
         config_vit.n_classes = args.classes
         config_vit.n_skip = 3
         if net_name.find('R50') != -1:
@@ -82,12 +82,39 @@ def select_model(args):
     return model
 
 
-DATA_SET = {0: ("Fluo-N2DH-SIM+", 3),
-            1: ("Fluo-C2DL-MSC", 3),
-            2: ("Fluo-N2DH-GOWT1", 5),
-            3: ("PhC-C2DL-PSC", 2),
-            4: ("BF-C2DL-HSC", 3),
-            5: ("Fluo-N2DL-HeLa", 3),
-            6: ("BF-C2DL-MuSC", 3),
-            7: ("DIC-C2DH-HeLa", 3),
-            8: ("PhC-C2DH-U373", 15)}
+def gaussian2D(shape, sigma=1):
+    m, n = [(ss - 1.) / 2. for ss in shape]
+    y, x = np.ogrid[-m:m + 1, -n:n + 1]
+
+    h = np.exp(-(x * x + y * y) / (2 * sigma * sigma))
+    h[h < np.finfo(h.dtype).eps * h.max()] = 0
+    return h
+
+
+def draw_umich_gaussian(heatmap, center, radius, k=1):
+    diameter = 2 * radius + 1
+    gaussian = gaussian2D((diameter, diameter), sigma=diameter / 6)
+
+    x, y = int(center[0]), int(center[1])
+
+    height, width = heatmap.shape[0:2]
+
+    left, right = min(x, radius), min(width - x, radius + 1)
+    top, bottom = min(y, radius), min(height - y, radius + 1)
+
+    masked_heatmap = heatmap[y - top:y + bottom, x - left:x + right]
+    masked_gaussian = gaussian[radius - top:radius + bottom, radius - left:radius + right]
+    if min(masked_gaussian.shape) > 0 and min(masked_heatmap.shape) > 0:  # TODO debug
+        np.maximum(masked_heatmap, masked_gaussian * k, out=masked_heatmap)
+    return heatmap
+
+
+DATA_SET = {0: ("Fluo-N2DH-SIM+", 10),
+            1: ("Fluo-C2DL-MSC", 10),
+            2: ("Fluo-N2DH-GOWT1", 10),
+            3: ("PhC-C2DL-PSC", 5),
+            4: ("BF-C2DL-HSC", 10),
+            5: ("Fluo-N2DL-HeLa", 10),
+            6: ("BF-C2DL-MuSC", 10),
+            7: ("DIC-C2DH-HeLa", 10),
+            8: ("PhC-C2DH-U373", 20)}

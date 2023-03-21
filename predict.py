@@ -21,7 +21,7 @@ ds_name, radius = DATA_SET[3]
 dir_img = Path('./data/train/' + ds_name + '/01')
 dir_seg = Path('./data/train/' + ds_name + '/01_ST/SEG')
 dir_track = Path('./data/train/' + ds_name + '/01_GT/TRA')
-dir_checkpoint = Path('./checkpoints/' + ds_name + '/w1.0_e10_bs4_lr1e-05_sz512_amp1')
+dir_checkpoint = Path('./checkpoints/' + ds_name)
 
 
 def predict_img(net,
@@ -30,7 +30,7 @@ def predict_img(net,
                 img_size=224,
                 out_threshold=0.5):
     net.eval()
-    img = torch.from_numpy(CTCDataset.preprocess(full_img, img_size, is_mask=False))
+    img = torch.from_numpy(CTCDataset.preprocess(full_img, img_size, flag='image'))
     img = img.unsqueeze(0)
     img = img.to(device=device, dtype=torch.float32)
 
@@ -62,9 +62,12 @@ def get_args():
     parser = argparse.ArgumentParser(description='Predict masks from input images')
     parser.add_argument('--model', '-m', default='MODEL.pth', metavar='FILE',
                         help='Specify the file in which the model is stored')
+    parser.add_argument('--epochs', '-e', metavar='E', type=int, default=5, help='Number of epochs')
     parser.add_argument('--input', '-i', metavar='INPUT', nargs='+', help='Filenames of input images', required=True)
     parser.add_argument('--output', '-o', metavar='OUTPUT', nargs='+', help='Filenames of output images')
     parser.add_argument('--batch-size', '-b', dest='batch_size', metavar='B', type=int, default=1, help='Batch size')
+    parser.add_argument('--learning-rate', '-l', metavar='LR', type=float, default=1e-5,
+                        help='Learning rate', dest='lr')
     parser.add_argument('--viz', '-v', action='store_true',
                         help='Visualize the images as they are processed')
     parser.add_argument('--no-save', '-n', action='store_true', help='Do not save the output masks')
@@ -72,13 +75,14 @@ def get_args():
                         help='Minimum probability value to consider a mask pixel white')
     parser.add_argument('--img-size', '-s', type=int, default=224,
                         help='Scale factor for the input images')
+    parser.add_argument('--amp', action='store_true', default=False, help='Use mixed precision')
     parser.add_argument('--bilinear', action='store_true', default=False, help='Use bilinear upsampling')
     parser.add_argument('--channels', type=int, default=1, help='Number of channels; channels=3 for RGB images')
     parser.add_argument('--classes', '-c', type=int, default=2, help='Number of classes')
-    # parser.add_argument('--n-skip', type=int,
-    #                     default=3, help='using number of skip-connect, default is num')
     parser.add_argument('--net-name', type=str,
-                        default='R50-ViT-B_16', help='select one vit model')
+                        default='unet', help='select one model')
+    parser.add_argument('--mtl-weight', type=float, default=0.5,
+                        help='Weight of multi-task loss: w * SEG + (1-w) * DET')
 
     return parser.parse_args()
 
@@ -116,12 +120,15 @@ if __name__ == '__main__':
 
     net = select_model(args)
 
+    dir_pth = dir_checkpoint / f'{args.net_name}_w{args.mtl_weight:.1f}_e{args.epochs}' \
+                                      f'_bs{args.batch_size}_lr{args.lr}' \
+                                      f'_sz{args.img_size}_amp{int(args.amp)}'
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    logging.info(f'Loading model {dir_checkpoint / args.model}')
+    logging.info(f'Loading model {dir_pth / args.model}')
     logging.info(f'Using device {device}')
 
     net.to(device=device)
-    state_dict = torch.load(dir_checkpoint / args.model, map_location=device)
+    state_dict = torch.load(dir_pth / args.model, map_location=device)
     # mask_values = state_dict.pop('mask_values')
     mask_values = [int(v / (args.classes - 1) * 255) for v in range(args.classes)] if args.classes > 1 else [255]
     net.load_state_dict(state_dict)
@@ -134,9 +141,10 @@ if __name__ == '__main__':
         img = tifffile.imread(dir_img / filename)
         seg_mask = tifffile.imread(dir_seg / ('man_seg' + filename[1:]))
         tra_mask = tifffile.imread(dir_track / ('man_track' + filename[1:]))
-        mask_true = np.stack((seg_mask, tra_mask), axis=-1)
-        mask_true = CTCDataset.preprocess(mask_true, -1, is_mask=True, radius=radius)
-        seg_mask, det_mask = mask_true[0, ...], mask_true[1, ...]
+        # mask_true = np.stack((seg_mask, tra_mask), axis=-1)
+        seg_mask = CTCDataset.preprocess(seg_mask, -1, flag='seg_mask', radius=radius)
+        det_mask = CTCDataset.preprocess(tra_mask, -1, flag='det_mask', radius=radius)
+        # seg_mask, det_mask = mask_true[0, ...], mask_true[1, ...]
 
         det_mask_pred, seg_mask_pred = predict_img(net=net,
                                                    full_img=img,
@@ -180,10 +188,10 @@ if __name__ == '__main__':
         if args.viz:
             logging.info(f'Visualizing results for image {filename}, close to continue...')
             # plot_img_and_mask(img, mask)
-            # plt.figure(1)
-            # plt.imshow(det_mask_pred)
-            # plt.figure(2)
-            # plt.imshow(result_pred)
-            plt.imshow(result)
+            plt.figure(1)
+            plt.imshow(det_mask_pred)
+            plt.figure(2)
+            plt.imshow(result_pred)
+            # plt.imshow(result)
             plt.xticks([]), plt.yticks([])
             plt.show()

@@ -15,6 +15,8 @@ import tifffile
 import cv2
 from typing import List
 
+from utils.utils import draw_umich_gaussian as draw_gaussian
+
 
 def load_image(filename):
     ext = splitext(filename)[1]
@@ -151,19 +153,21 @@ class CTCDataset(Dataset):
         return len(self.ids)
 
     @staticmethod
-    def preprocess(img: np.ndarray, img_size: int, is_mask: bool, radius=3):
+    def preprocess(img: np.ndarray, img_size: int, flag: str, radius=3):
         if img_size > 0:
             img = cv2.resize(img, (img_size, img_size),
-                             interpolation=cv2.INTER_NEAREST if is_mask else cv2.INTER_CUBIC)
-        if is_mask:
+                             interpolation=cv2.INTER_NEAREST if flag != 'image' else cv2.INTER_CUBIC)
+
+        if flag == 'det_mask':
             img = 255 * np.uint8(img > 0)
             # img = img.transpose((2, 0, 1)) / 255.0
-            seg_bin, tra_bin = img[..., 0], img[..., 1]
-            cnts, _ = cv2.findContours(tra_bin, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-            det_bin = np.zeros_like(tra_bin)
+            # seg_bin, tra_bin = img[..., 0], img[..., 1]
+            cnts, _ = cv2.findContours(img, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+            img = np.zeros_like(img, dtype=np.float64)
             for cnt in cnts:
                 center = cnt_center(cnt)
-                cv2.circle(det_bin, center, radius, 255, -1)
+                # cv2.circle(det_bin, center, radius, 255, -1)
+                draw_gaussian(img, center, radius)
             # diff = cv2.absdiff(det_bin, seg_bin)
             # cnts, hier = cv2.findContours(diff, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
             # hier = np.squeeze(hier)
@@ -185,15 +189,18 @@ class CTCDataset(Dataset):
             #             # cv2.drawContours(det_mask, cnts, next_child, 2, -1)
             #             cv2.drawContours(seg_mask, cnts, i, 1, -1)
             #         # cv2.drawContours(det_mask, cnts, i, 50, 1)
-            img = np.stack((seg_bin, det_bin), axis=0)
-            img = np.uint8(img / 255)
-        else:
+            # img = np.stack((seg_bin, det_bin), axis=0)
+            # img = np.uint8(img / 255)
+        elif flag == 'seg_mask':
+            img = np.uint8(img > 0)
+        elif flag == 'image':
             if img.ndim == 2:
                 img = img[np.newaxis, ...]
             else:
                 img = img.transpose((2, 0, 1))
-
             img = img / 255.0 if (img > 1).any() else img
+        else:
+            print(f'Unrecognized flag: {flag}, expected `image`,`det_mask` or `seg_mask`')
 
         return img
 
@@ -209,17 +216,19 @@ class CTCDataset(Dataset):
         img = tifffile.imread(img_file[0])
         seg_mask = tifffile.imread(seg_file[0])
         track_mask = tifffile.imread(track_file[0])
-        mask = np.stack((seg_mask, track_mask), axis=-1)
+        # mask = np.stack((seg_mask, track_mask), axis=-1)
 
         assert img.shape[:2] == seg_mask.shape == track_mask.shape, \
             f'Image and mask {name} should be the same shape, ' \
             f'but are image:{img.shape} and mask:{seg_mask.shape}, {track_mask.shape}'
 
-        img = self.preprocess(img, self.img_size, is_mask=False, radius=self.radius)
-        mask = self.preprocess(mask, self.img_size, is_mask=True, radius=self.radius)
+        img = self.preprocess(img, self.img_size, flag='image', radius=self.radius)
+        det_mask = self.preprocess(track_mask, self.img_size, flag='det_mask', radius=self.radius)
+        seg_mask = self.preprocess(seg_mask, self.img_size, flag='seg_mask', radius=self.radius)
 
         return {
             'image': torch.as_tensor(img.copy()).float().contiguous(),
-            'mask': torch.as_tensor(mask.copy()).long().contiguous()
+            'det_mask': torch.as_tensor(det_mask.copy()).float().contiguous(),
+            'seg_mask': torch.as_tensor(seg_mask.copy()).long().contiguous()
         }
         # return {'image': img, 'mask': mask}
