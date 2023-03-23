@@ -135,22 +135,24 @@ def cnt_center(cnt: List[tuple]):
 
 
 class CTCDataset(Dataset):
-    def __init__(self, images_dir, masks_dir, img_size=224, n_classes=2, radius=3):
-        self.images_dir = Path(images_dir)
-        self.seg_dir = Path(masks_dir['SEG'])
-        self.track_dir = Path(masks_dir['TRA'])
+    def __init__(self, ds_dir, img_size=224, n_classes=2, radius=3):
+        self.images_dir = {'01': Path(ds_dir) / '01', '02': Path(ds_dir) / '02'}
+        self.seg_dir = {'01': Path(ds_dir) / '01_ST/SEG', '02': Path(ds_dir) / '02_ST/SEG'}
+        self.track_dir = {'01': Path(ds_dir) / '01_GT/TRA', '02': Path(ds_dir) / '02_GT/TRA'}
         self.n_classes = n_classes
         # self.mask_values = [int(v / (n_classes - 1) * 255) for v in range(n_classes)] if n_classes > 1 else [255]
         self.img_size = img_size
         self.radius = radius
 
-        self.ids = [splitext(str(file))[0] for file in listdir(images_dir) if not str(file).startswith('.')]
+        self.ids = {
+            '01': [splitext(str(file))[0] for file in listdir(self.images_dir['01']) if not str(file).startswith('.')],
+            '02': [splitext(str(file))[0] for file in listdir(self.images_dir['02']) if not str(file).startswith('.')]}
         if not self.ids:
-            raise RuntimeError(f'No input file found in {images_dir}, make sure you put your images there')
-        logging.info(f'Creating dataset with {len(self.ids)} examples')
+            raise RuntimeError(f'No input file found in {self.images_dir}, make sure you put your images there')
+        logging.info(f'Creating dataset with {len(self.ids["01"] + self.ids["02"])} examples')
 
     def __len__(self):
-        return len(self.ids)
+        return len(self.ids['01'] + self.ids['02'])
 
     @staticmethod
     def preprocess(img: np.ndarray, img_size: int, flag: str, radius=3):
@@ -205,10 +207,15 @@ class CTCDataset(Dataset):
         return img
 
     def __getitem__(self, idx):
-        name = self.ids[idx]
-        img_file = list(self.images_dir.glob(name + '.tif'))
-        seg_file = list(self.seg_dir.glob(name.replace('t', 'man_seg') + '.tif'))
-        track_file = list(self.track_dir.glob(name.replace('t', 'man_track') + '.tif'))
+        if idx < len(self.ids['01']):
+            flag = '01'
+        else:
+            flag = '02'
+            idx -= len(self.ids['01'])
+        name = self.ids[flag][idx]
+        img_file = list(self.images_dir[flag].glob(name + '.tif'))
+        seg_file = list(self.seg_dir[flag].glob(name.replace('t', 'man_seg') + '.tif'))
+        track_file = list(self.track_dir[flag].glob(name.replace('t', 'man_track') + '.tif'))
 
         assert len(img_file) == 1, f'Either no image or multiple images found for the ID {name}: {img_file}'
         assert len(seg_file) == 1, f'Either no mask or multiple masks found for the ID {name}: {seg_file}'

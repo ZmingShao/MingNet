@@ -23,9 +23,10 @@ from utils.loss import MultiTaskLoss
 from utils.utils import DATA_SET, select_model
 
 ds_name, radius = DATA_SET[3]
-dir_img = Path('./data/train/' + ds_name + '/02')
-dir_seg = Path('./data/train/' + ds_name + '/02_ST/SEG')
-dir_track = Path('./data/train/' + ds_name + '/02_GT/TRA')
+dir_ds = Path('./data/train/' + ds_name)
+# dir_img = Path('./data/train/' + ds_name + '/02')
+# dir_seg = Path('./data/train/' + ds_name + '/02_ST/SEG')
+# dir_track = Path('./data/train/' + ds_name + '/02_GT/TRA')
 dir_checkpoint = Path('./checkpoints/' + ds_name)
 
 
@@ -42,12 +43,13 @@ def train_model(
         weight_decay: float = 1e-8,
         momentum: float = 0.999,
         gradient_clipping: float = 1.0,
+        n_classes: int = 2,
         net_name: str = 'unet',
         mtl_weight: float = 0.5
 ):
     # 1. Create dataset
     try:
-        dataset = CTCDataset(dir_img, {'SEG': dir_seg, 'TRA': dir_track}, img_size, args.classes, radius=radius)
+        dataset = CTCDataset(dir_ds, img_size, n_classes, radius=radius)
     except (AssertionError, RuntimeError, IndexError) as e:
         logging.error(e)
         exit(-1)
@@ -247,6 +249,7 @@ if __name__ == '__main__':
             img_size=args.img_size,
             val_percent=args.val / 100,
             amp=args.amp,
+            n_classes=args.classes,
             net_name=args.net_name,
             mtl_weight=args.mtl_weight
         )
