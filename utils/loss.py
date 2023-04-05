@@ -41,7 +41,10 @@ class FocalLoss(nn.Module):
 
     def forward(self, out, target):
         out = torch.clamp(out.sigmoid_(), min=1e-4, max=1 - 1e-4)
-        return self.neg_loss(out, target)
+        if target.ndim == 3:
+            target = target.unsqueeze(1)
+
+        return self.neg_loss(out[:, 1:, ...], target)
 
 
 class MultiTaskLoss(nn.Module):
@@ -51,9 +54,9 @@ class MultiTaskLoss(nn.Module):
         self.focal_loss = FocalLoss()
         if task == 'DET':
             # self.loss = lambda pred, mask: self.ce_loss(pred, mask)
-            self.loss = lambda pred, mask: self.focal_loss(pred[:, 1, ...], mask)
+            self.loss = lambda pred, mask: self.focal_loss(pred, mask)
         elif task == 'SEG':
-            # self.loss = lambda pred, mask: self.focal_loss(pred[:, 1, ...], mask)
+            # self.loss = lambda pred, mask: self.focal_loss(pred, mask)
             self.loss = lambda pred, mask: 0.5 * self.ce_loss(pred, mask) + 0.5 * dice_loss(
                 F.softmax(pred, dim=1).float(),
                 F.one_hot(mask, n_classes).permute(0, 3, 1, 2).float(),

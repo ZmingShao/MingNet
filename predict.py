@@ -44,7 +44,7 @@ def predict_img(net,
             output = output.cpu()
         output = F.interpolate(output, full_img.shape[:2], mode='bilinear')
         mask_pred = output.argmax(dim=1) if net.n_classes > 1 else torch.sigmoid(output) > out_threshold
-        mask_pred_det = (mask_pred[0] > 0.5).long().squeeze().numpy()
+        mask_pred_det = (mask_pred[0] > 0).long().squeeze().numpy()
         # SEG
         output = outputs[1]
         if isinstance(output, (tuple, list)):
