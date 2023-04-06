@@ -3,6 +3,7 @@ import numpy as np
 import cv2
 import torch.nn as nn
 
+from networks.ming_net import MingNet
 from networks.trans_unet import VisionTransformer, CONFIGS as CONFIGS_vit
 from networks.unet import UNet
 from networks.swin_unet import SwinUnet, get_config as get_config_swin
@@ -43,7 +44,12 @@ def det_vis(img, mask, mask_values, radius=3):
 #     plt.show()
 
 def select_model(args):
-    if args.net_name == 'unet':
+    if args.net_name == 'ming_net':
+        model = MingNet(n_channels=args.channels,
+                        n_classes=args.classes,
+                        img_size=args.img_size,
+                        bilinear=args.bilinear)
+    elif args.net_name == 'unet':
         model = UNet(n_channels=args.channels, n_classes=args.classes, bilinear=args.bilinear)
     elif args.net_name == 'trans_unet':
         net_name = 'R50-ViT-B_16'

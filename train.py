@@ -1,32 +1,20 @@
 import argparse
 import logging
 import os
-import random
-import sys
-
-import numpy as np
-import torch
-import torch.nn as nn
-# import torch.nn.functional as F
-# import torchvision.transforms as transforms
-# import torchvision.transforms.functional as TF
 from pathlib import Path
+import torch
+import wandb
 from torch import optim
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 
-import wandb
 from evaluate import evaluate
 from utils.data_loading import CTCDataset
-# from utils.dice_score import dice_loss
 from utils.loss import MultiTaskLoss
 from utils.utils import DATA_SET, select_model
 
 ds_name, radius = DATA_SET[3]
 dir_ds = Path('./data/train/' + ds_name)
-# dir_img = Path('./data/train/' + ds_name + '/02')
-# dir_seg = Path('./data/train/' + ds_name + '/02_ST/SEG')
-# dir_track = Path('./data/train/' + ds_name + '/02_GT/TRA')
 dir_checkpoint = Path('./checkpoints/' + ds_name)
 
 
@@ -108,7 +96,7 @@ def train_model(
                     'the images are loaded correctly.'
 
                 images = images.to(device=device, dtype=torch.float32, memory_format=torch.channels_last)
-                mask_det = mask_det.to(device=device, dtype=torch.float32)
+                mask_det = mask_det.to(device=device, dtype=torch.long)
                 mask_seg = mask_seg.to(device=device, dtype=torch.long)
 
                 with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
@@ -186,9 +174,7 @@ def train_model(
             dir_pth = dir_checkpoint / f'{net_name}_w{mtl_weight:.1f}_e{epochs}_bs{batch_size}' \
                                        f'_lr{learning_rate}_sz{img_size}_amp{int(amp)}'
             Path(dir_pth).mkdir(parents=True, exist_ok=True)
-            state_dict = model.state_dict()
-            # state_dict['mask_values'] = dataset.mask_values
-            torch.save(state_dict, str(dir_pth / f'checkpoint_epoch{epoch}.pth'))
+            torch.save(model.state_dict(), str(dir_pth / f'checkpoint_epoch{epoch}.pth'))
             logging.info(f'Checkpoint {epoch} saved!')
 
 
@@ -231,7 +217,6 @@ if __name__ == '__main__':
 
     if args.load:
         state_dict = torch.load(args.load, map_location=device)
-        # del state_dict['mask_values']
         model.load_state_dict(state_dict)
         logging.info(f'Model loaded from {args.load}')
     # else:

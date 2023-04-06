@@ -1,15 +1,13 @@
 import argparse
 import logging
 import os
-import matplotlib.pyplot as plt
-import cv2
-import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from PIL import Image
-import tifffile
 from pathlib import Path
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
+import tifffile
+import torch
+import torch.nn.functional as F
 
 from utils.data_loading import CTCDataset
 from utils.utils import DATA_SET, det_vis, select_model
@@ -53,7 +51,7 @@ def predict_img(net,
             output = output.cpu()
         output = F.interpolate(output, full_img.shape[:2], mode='bilinear')
         mask_pred = output.argmax(dim=1) if net.n_classes > 1 else torch.sigmoid(output) > out_threshold
-        mask_pred_seg = mask_pred[0].long().squeeze().numpy()
+        mask_pred_seg = (mask_pred[0] > 0).long().squeeze().numpy()
 
     return mask_pred_det, mask_pred_seg
 
@@ -121,8 +119,8 @@ if __name__ == '__main__':
     net = select_model(args)
 
     dir_pth = dir_checkpoint / f'{args.net_name}_w{args.mtl_weight:.1f}_e{args.epochs}' \
-                                      f'_bs{args.batch_size}_lr{args.lr}' \
-                                      f'_sz{args.img_size}_amp{int(args.amp)}'
+                               f'_bs{args.batch_size}_lr{args.lr}' \
+                               f'_sz{args.img_size}_amp{int(args.amp)}'
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logging.info(f'Loading model {dir_pth / args.model}')
     logging.info(f'Using device {device}')

@@ -53,8 +53,8 @@ class MultiTaskLoss(nn.Module):
         self.ce_loss = nn.CrossEntropyLoss()
         self.focal_loss = FocalLoss()
         if task == 'DET':
-            # self.loss = lambda pred, mask: self.ce_loss(pred, mask)
-            self.loss = lambda pred, mask: self.focal_loss(pred, mask)
+            self.loss = lambda pred, mask: self.ce_loss(pred, mask)
+            # self.loss = lambda pred, mask: self.focal_loss(pred, mask)
         elif task == 'SEG':
             # self.loss = lambda pred, mask: self.focal_loss(pred, mask)
             self.loss = lambda pred, mask: 0.5 * self.ce_loss(pred, mask) + 0.5 * dice_loss(

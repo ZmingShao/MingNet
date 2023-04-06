@@ -161,15 +161,17 @@ class CTCDataset(Dataset):
                              interpolation=cv2.INTER_NEAREST if flag != 'image' else cv2.INTER_CUBIC)
 
         if flag == 'det_mask':
-            img = 255 * np.uint8(img > 0)
-            # img = img.transpose((2, 0, 1)) / 255.0
-            # seg_bin, tra_bin = img[..., 0], img[..., 1]
-            cnts, _ = cv2.findContours(img, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-            img = np.zeros_like(img, dtype=np.float64)
-            for cnt in cnts:
-                center = cnt_center(cnt)
-                # cv2.circle(det_bin, center, radius, 255, -1)
-                draw_gaussian(img, center, radius)
+            img = np.uint8(img > 0)
+            # img = 255 * np.uint8(img > 0)
+            # # img = img.transpose((2, 0, 1)) / 255.0
+            # # seg_bin, tra_bin = img[..., 0], img[..., 1]
+            # cnts, _ = cv2.findContours(img, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+            # img = np.zeros_like(img, dtype=np.float64)
+            # for cnt in cnts:
+            #     center = cnt_center(cnt)
+            #     # cv2.circle(det_bin, center, radius, 255, -1)
+            #     draw_gaussian(img, center, radius)
+
             # diff = cv2.absdiff(det_bin, seg_bin)
             # cnts, hier = cv2.findContours(diff, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
             # hier = np.squeeze(hier)
@@ -235,7 +237,7 @@ class CTCDataset(Dataset):
 
         return {
             'image': torch.as_tensor(img.copy()).float().contiguous(),
-            'det_mask': torch.as_tensor(det_mask.copy()).float().contiguous(),
+            'det_mask': torch.as_tensor(det_mask.copy()).long().contiguous(),
             'seg_mask': torch.as_tensor(seg_mask.copy()).long().contiguous()
         }
         # return {'image': img, 'mask': mask}
