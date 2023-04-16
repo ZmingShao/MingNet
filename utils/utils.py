@@ -17,9 +17,9 @@ def det_vis(img, mask, mask_values, radius=3):
     for i, v in enumerate(mask_values[1:]):
         cnts, _ = cv2.findContours(np.uint8(mask == v), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
         for cnt in cnts:
-            area_true = np.pi * radius ** 2
-            if cv2.contourArea(cnt) < area_true * 0.3 and radius > 5:
-                continue
+            # area_true = np.pi * radius ** 2
+            # if cv2.contourArea(cnt) < area_true * 0.3 and radius > 5:
+            #     continue
             M = cv2.moments(cnt)
             if M['m00'] != 0:
                 center = (int(M['m10'] / M['m00']), int(M['m01'] / M['m00']))
@@ -27,7 +27,7 @@ def det_vis(img, mask, mask_values, radius=3):
                 while isinstance(cnt[0], np.ndarray):
                     cnt = cnt[0]
                 center = cnt
-            cv2.circle(img, center, 3, colors[i], -1)
+            cv2.circle(img, center, 1, colors[i], -1)
     return img
 
 
@@ -48,6 +48,7 @@ def select_model(args):
         model = MingNet(n_channels=args.channels,
                         n_classes=args.classes,
                         img_size=args.img_size,
+                        patch_size=args.patch_size,
                         bilinear=args.bilinear)
     elif args.net_name == 'unet':
         model = UNet(n_channels=args.channels, n_classes=args.classes, bilinear=args.bilinear)
@@ -58,7 +59,7 @@ def select_model(args):
         config_vit.n_skip = 3
         if net_name.find('R50') != -1:
             config_vit.patches.grid = (
-                int(args.img_size / 16), int(args.img_size / 16))
+                int(args.scale / 16), int(args.scale / 16))
         model = VisionTransformer(config_vit,
                                   img_size=args.img_size,
                                   n_classes=args.classes,

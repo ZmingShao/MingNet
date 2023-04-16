@@ -24,6 +24,8 @@ def load_image(filename):
         return Image.fromarray(np.load(filename))
     elif ext in ['.pt', '.pth']:
         return Image.fromarray(torch.load(filename).numpy())
+    elif ext == '.tif':
+        return tifffile.imread(filename)
     else:
         return Image.open(filename)
 
@@ -135,13 +137,14 @@ def cnt_center(cnt: List[tuple]):
 
 
 class CTCDataset(Dataset):
-    def __init__(self, ds_dir, img_size=224, n_classes=2, radius=3):
+    def __init__(self, ds_dir, scale=1.0, n_classes=2, patch_size=32, radius=3):
         self.images_dir = {'01': Path(ds_dir) / '01', '02': Path(ds_dir) / '02'}
         self.seg_dir = {'01': Path(ds_dir) / '01_ST/SEG', '02': Path(ds_dir) / '02_ST/SEG'}
         self.track_dir = {'01': Path(ds_dir) / '01_GT/TRA', '02': Path(ds_dir) / '02_GT/TRA'}
         self.n_classes = n_classes
         # self.mask_values = [int(v / (n_classes - 1) * 255) for v in range(n_classes)] if n_classes > 1 else [255]
-        self.img_size = img_size
+        self.scale = scale
+        self.patch_size = patch_size
         self.radius = radius
 
         self.ids = {
@@ -154,11 +157,21 @@ class CTCDataset(Dataset):
     def __len__(self):
         return len(self.ids['01'] + self.ids['02'])
 
+    def image_size(self):
+        img_path = list(self.images_dir['01'].glob('*.tif'))[0]
+        img = load_image(str(img_path))
+        scaled_size = tuple(map(lambda x: int(x * self.scale), img.shape[:2]))
+        padded_size = tuple(s + self.patch_size - s % self.patch_size for s in scaled_size)
+        return padded_size
+
     @staticmethod
-    def preprocess(img: np.ndarray, img_size: int, flag: str, radius=3):
-        if img_size > 0:
-            img = cv2.resize(img, (img_size, img_size),
-                             interpolation=cv2.INTER_NEAREST if flag != 'image' else cv2.INTER_CUBIC)
+    def preprocess(img: np.ndarray, flag: str, scale: float = 1.0, patch_size=32):
+        new_shape = tuple(map(lambda x: int(x * scale), img.shape[:2]))
+        img = cv2.resize(img, new_shape[::-1],
+                         interpolation=cv2.INTER_NEAREST if flag != 'image' else cv2.INTER_CUBIC)
+        pad_y, pad_x = map(lambda x: patch_size - x % patch_size, new_shape)
+        img = np.pad(img, pad_width=((pad_y // 2, pad_y - pad_y // 2),
+                                     (pad_x // 2, pad_x - pad_x // 2)))
 
         if flag == 'det_mask':
             img = np.uint8(img > 0)
@@ -222,18 +235,18 @@ class CTCDataset(Dataset):
         assert len(img_file) == 1, f'Either no image or multiple images found for the ID {name}: {img_file}'
         assert len(seg_file) == 1, f'Either no mask or multiple masks found for the ID {name}: {seg_file}'
         assert len(track_file) == 1, f'Either no mask or multiple masks found for the ID {name}: {track_file}'
-        img = tifffile.imread(img_file[0])
-        seg_mask = tifffile.imread(seg_file[0])
-        track_mask = tifffile.imread(track_file[0])
+        img = load_image(str(img_file[0]))
+        seg_mask = load_image(str(seg_file[0]))
+        track_mask = load_image(str(track_file[0]))
         # mask = np.stack((seg_mask, track_mask), axis=-1)
 
         assert img.shape[:2] == seg_mask.shape == track_mask.shape, \
             f'Image and mask {name} should be the same shape, ' \
             f'but are image:{img.shape} and mask:{seg_mask.shape}, {track_mask.shape}'
 
-        img = self.preprocess(img, self.img_size, flag='image', radius=self.radius)
-        det_mask = self.preprocess(track_mask, self.img_size, flag='det_mask', radius=self.radius)
-        seg_mask = self.preprocess(seg_mask, self.img_size, flag='seg_mask', radius=self.radius)
+        img = self.preprocess(img, flag='image', scale=self.scale, patch_size=self.patch_size)
+        det_mask = self.preprocess(track_mask, flag='det_mask', scale=self.scale, patch_size=self.patch_size)
+        seg_mask = self.preprocess(seg_mask, flag='seg_mask', scale=self.scale, patch_size=self.patch_size)
 
         return {
             'image': torch.as_tensor(img.copy()).float().contiguous(),

@@ -20,28 +20,21 @@ dir_checkpoint = Path('./checkpoints/' + ds_name)
 
 def train_model(
         model,
+        dataset,
         device,
         epochs: int = 5,
         batch_size: int = 1,
         learning_rate: float = 1e-5,
         val_percent: float = 0.1,
         save_checkpoint: bool = True,
-        img_size: float = 224,
+        scale: float = 1.0,
         amp: bool = False,
         weight_decay: float = 1e-8,
         momentum: float = 0.999,
         gradient_clipping: float = 1.0,
-        n_classes: int = 2,
         net_name: str = 'unet',
         mtl_weight: float = 0.5
 ):
-    # 1. Create dataset
-    try:
-        dataset = CTCDataset(dir_ds, img_size, n_classes, radius=radius)
-    except (AssertionError, RuntimeError, IndexError) as e:
-        logging.error(e)
-        exit(-1)
-
     # 2. Split into train / validation partitions
     n_val = int(len(dataset) * val_percent)
     n_train = len(dataset) - n_val
@@ -56,7 +49,7 @@ def train_model(
     experiment = wandb.init(project='U-Net', resume='allow', anonymous='must')
     experiment.config.update(
         dict(epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
-             val_percent=val_percent, save_checkpoint=save_checkpoint, img_size=img_size, amp=amp)
+             val_percent=val_percent, save_checkpoint=save_checkpoint, img_size=scale, amp=amp)
     )
 
     logging.info(f'''Starting training:
@@ -67,7 +60,7 @@ def train_model(
         Validation size: {n_val}
         Checkpoints:     {save_checkpoint}
         Device:          {device.type}
-        Images size:     {img_size}
+        Downscaling:     {scale}
         Mixed Precision: {amp}
     ''')
 
@@ -172,7 +165,7 @@ def train_model(
 
         if save_checkpoint:
             dir_pth = dir_checkpoint / f'{net_name}_w{mtl_weight:.1f}_e{epochs}_bs{batch_size}' \
-                                       f'_lr{learning_rate}_sz{img_size}_amp{int(amp)}'
+                                       f'_lr{learning_rate}_s{scale:.1f}_amp{int(amp)}'
             Path(dir_pth).mkdir(parents=True, exist_ok=True)
             torch.save(model.state_dict(), str(dir_pth / f'checkpoint_epoch{epoch}.pth'))
             logging.info(f'Checkpoint {epoch} saved!')
@@ -185,7 +178,7 @@ def get_args():
     parser.add_argument('--learning-rate', '-l', metavar='LR', type=float, default=1e-5,
                         help='Learning rate', dest='lr')
     parser.add_argument('--load', '-f', type=str, default=False, help='Load model from a .pth file')
-    parser.add_argument('--img-size', '-s', type=int, default=224, help='Downscaling factor of the images')
+    parser.add_argument('--scale', '-s', type=float, default=1.0, help='Downscaling factor of the images')
     parser.add_argument('--validation', '-v', dest='val', type=float, default=10.0,
                         help='Percent of the data that is used as validation (0-100)')
     parser.add_argument('--amp', action='store_true', default=False, help='Use mixed precision')
@@ -195,6 +188,7 @@ def get_args():
     parser.add_argument('--net-name', type=str, default='unet', help='select one model')
     parser.add_argument('--mtl-weight', type=float, default=0.5,
                         help='Weight of multi-task loss: w * SEG + (1-w) * DET')
+    parser.add_argument('--patch-size', '-p', type=int, default=32, help='Patch size for ViT')
 
     return parser.parse_args()
 
@@ -206,6 +200,14 @@ if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logging.info(f'Using device {device}')
 
+    # 1. Create dataset
+    try:
+        dataset = CTCDataset(dir_ds, args.scale, args.classes, args.patch_size)
+    except (AssertionError, RuntimeError, IndexError) as e:
+        logging.error(e)
+        exit(-1)
+
+    args.img_size = dataset.image_size()
     model = select_model(args)
     model = model.to(memory_format=torch.channels_last)
 
@@ -225,19 +227,9 @@ if __name__ == '__main__':
 
     model.to(device=device)
     try:
-        train_model(
-            model=model,
-            epochs=args.epochs,
-            batch_size=args.batch_size,
-            learning_rate=args.lr,
-            device=device,
-            img_size=args.img_size,
-            val_percent=args.val / 100,
-            amp=args.amp,
-            n_classes=args.classes,
-            net_name=args.net_name,
-            mtl_weight=args.mtl_weight
-        )
+        train_model(model=model, dataset=dataset, device=device, epochs=args.epochs, batch_size=args.batch_size,
+                    learning_rate=args.lr, val_percent=args.val / 100, scale=args.scale, amp=args.amp,
+                    net_name=args.net_name, mtl_weight=args.mtl_weight)
     except torch.cuda.OutOfMemoryError:
         logging.error('Detected OutOfMemoryError! '
                       'Enabling checkpointing to reduce memory usage, but this slows down training. '
@@ -250,7 +242,7 @@ if __name__ == '__main__':
         #     batch_size=args.batch_size,
         #     learning_rate=args.lr,
         #     device=device,
-        #     img_size=args.img_size,
+        #     scale=args.scale,
         #     val_percent=args.val / 100,
         #     amp=args.amp
         # )

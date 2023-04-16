@@ -1,9 +1,11 @@
+import torch
+
 from ..unet.unet_parts import *
 from .trans_part import SmallDatasetViT
 
 
 class MingNet(nn.Module):
-    def __init__(self, n_channels, n_classes, img_size, bilinear=False):
+    def __init__(self, n_channels, n_classes, img_size, patch_size=32, bilinear=False):
         super(MingNet, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
@@ -16,7 +18,9 @@ class MingNet(nn.Module):
         self.down2 = (Down(128, 256))
         self.down3 = (Down(256, 512 // factor))
 
-        self.transformer = SmallDatasetViT(512 // factor, image_size=img_size // 8)
+        self.transformer = SmallDatasetViT(512 // factor,
+                                           image_size=tuple(map(lambda x: x // 8, img_size)),
+                                           patch_size=patch_size // 8)
 
         self.up3 = (Up(512, 256 // factor, bilinear))
         self.up2 = (Up(256, 128 // factor, bilinear))

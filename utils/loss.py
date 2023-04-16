@@ -41,7 +41,7 @@ class FocalLoss(nn.Module):
 
     def forward(self, out, target):
         out = torch.clamp(out.sigmoid_(), min=1e-4, max=1 - 1e-4)
-        if target.ndim == 3:
+        if target.ndim < out.ndim:
             target = target.unsqueeze(1)
 
         return self.neg_loss(out[:, 1:, ...], target)
