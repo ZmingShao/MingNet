@@ -7,15 +7,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tifffile
 import torch
-import torch.nn.functional as F
 
 from utils.data_loading import CTCDataset
-from utils.utils import DATA_SET, det_vis, select_model
+from utils.utils import DATA_SET, select_model
 
 os.environ['NUMEXPR_MAX_THREADS'] = '16'
 
 ds_name, radius = DATA_SET[3]
-# dir_img = Path('./data/test/' + ds_name + '/02')
 dir_img = Path('./data/train/' + ds_name + '/01')
 dir_seg = Path('./data/train/' + ds_name + '/01_ST/SEG')
 dir_track = Path('./data/train/' + ds_name + '/01_GT/TRA')
@@ -33,27 +31,15 @@ def predict_img(net,
     img = img.to(device=device, dtype=torch.float32)
 
     with torch.no_grad():
-        outputs = net(img)
-        # DET
-        output = outputs[0]
+        output = net(img)
         if isinstance(output, (tuple, list)):
             output = output[0].cpu()
         else:
             output = output.cpu()
         # output = F.interpolate(output, full_img.shape[:2], mode='bilinear')
-        mask_pred = output.argmax(dim=1) if net.n_classes > 1 else torch.sigmoid(output) > out_threshold
-        mask_pred_det = (mask_pred[0] > 0).long().squeeze().numpy()
-        # SEG
-        output = outputs[1]
-        if isinstance(output, (tuple, list)):
-            output = output[0].cpu()
-        else:
-            output = output.cpu()
-        # output = F.interpolate(output, full_img.shape[:2], mode='bilinear')
-        mask_pred = output.argmax(dim=1) if net.n_classes > 1 else torch.sigmoid(output) > out_threshold
-        mask_pred_seg = (mask_pred[0] > 0).long().squeeze().numpy()
+        mask = output.argmax(dim=1) if net.n_classes > 1 else torch.sigmoid(output) > out_threshold
 
-    return mask_pred_det, mask_pred_seg
+    return mask[0].long().squeeze().numpy()
 
 
 def get_args():
@@ -71,15 +57,14 @@ def get_args():
     parser.add_argument('--no-save', '-n', action='store_true', help='Do not save the output masks')
     parser.add_argument('--mask-threshold', '-t', type=float, default=0.5,
                         help='Minimum probability value to consider a mask pixel white')
-    parser.add_argument('--scale', '-s', type=float, default=1.0, help='Downscaling factor of the images')
+    parser.add_argument('--scale', '-s', type=float, default=0.5,
+                        help='Scale factor for the input images')
     parser.add_argument('--amp', action='store_true', default=False, help='Use mixed precision')
     parser.add_argument('--bilinear', action='store_true', default=False, help='Use bilinear upsampling')
     parser.add_argument('--channels', type=int, default=1, help='Number of channels; channels=3 for RGB images')
     parser.add_argument('--classes', '-c', type=int, default=2, help='Number of classes')
     parser.add_argument('--net-name', type=str,
                         default='unet', help='select one model')
-    parser.add_argument('--mtl-weight', type=float, default=0.5,
-                        help='Weight of multi-task loss: w * SEG + (1-w) * DET')
     parser.add_argument('--patch-size', '-p', type=int, default=32, help='Patch size for ViT')
 
     return parser.parse_args()
@@ -118,16 +103,14 @@ if __name__ == '__main__':
 
     logging.info(f'\nPredicting image {dir_img / in_filename} ...')
     img = tifffile.imread(dir_img / in_filename)
-    seg_mask = tifffile.imread(dir_seg / ('man_seg' + in_filename[1:]))
-    tra_mask = tifffile.imread(dir_track / ('man_track' + in_filename[1:]))
+    mask = tifffile.imread(dir_seg / ('man_seg' + in_filename[1:]))
     img = CTCDataset.preprocess(img, flag='image', scale=args.scale, patch_size=args.patch_size)
-    seg_mask = CTCDataset.preprocess(seg_mask, flag='seg_mask', scale=args.scale, patch_size=args.patch_size)
-    det_mask = CTCDataset.preprocess(tra_mask, flag='det_mask', scale=args.scale, patch_size=args.patch_size)
+    mask = CTCDataset.preprocess(mask, flag='mask', scale=args.scale, patch_size=args.patch_size)
 
     args.img_size = img.shape[-2:]
     net = select_model(args)
 
-    dir_pth = dir_checkpoint / f'{args.net_name}_w{args.mtl_weight:.1f}_e{args.epochs}' \
+    dir_pth = dir_checkpoint / f'{args.net_name}_e{args.epochs}' \
                                f'_bs{args.batch_size}_lr{args.lr}' \
                                f'_s{args.scale:.1f}_amp{int(args.amp)}'
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -136,43 +119,29 @@ if __name__ == '__main__':
 
     net.to(device=device)
     state_dict = torch.load(dir_pth / args.model, map_location=device)
-    # mask_values = state_dict.pop('mask_values')
     mask_values = [int(v / (args.classes - 1) * 255) for v in range(args.classes)] if args.classes > 1 else [255]
     net.load_state_dict(state_dict)
 
     logging.info('Model loaded!')
 
-    det_mask_pred, seg_mask_pred = predict_img(net=net,
-                                               full_img=img,
-                                               out_threshold=args.mask_threshold,
-                                               device=device)
+    mask_pred = predict_img(net=net,
+                            full_img=img,
+                            out_threshold=args.mask_threshold,
+                            device=device)
     # IMAGE
     img = np.uint8(255 * img.squeeze())
 
-    # DET
-    det_mask_pred = mask_to_image(det_mask_pred, mask_values)
-    result_pred = det_vis(img, det_mask_pred, mask_values, radius=radius)
-
-    det_mask = mask_to_image(det_mask, mask_values)
-    result_true = det_vis(img, det_mask, mask_values, radius=radius)
-
-    result_det = np.hstack((result_true, result_pred))
-
     # SEG
-    inter = 2 * (seg_mask_pred * seg_mask).sum(axis=(-1, -2))
-    sets_sum = seg_mask_pred.sum(axis=(-1, -2)) + seg_mask.sum(axis=(-1, -2))
+    inter = 2 * (mask_pred * mask).sum(axis=(-1, -2))
+    sets_sum = mask_pred.sum(axis=(-1, -2)) + mask.sum(axis=(-1, -2))
     sets_sum = np.where(sets_sum == 0, inter, sets_sum)
     epsilon = 1e-6
     dice = (inter + epsilon) / (sets_sum + epsilon)
     logging.info(f'Dice score of segmentation: {dice:.3f}')
 
-    seg_mask_pred = mask_to_image(seg_mask_pred, mask_values)
-    seg_mask = mask_to_image(seg_mask, mask_values)
-    result_seg = np.hstack((seg_mask, seg_mask_pred))
-    result_seg = cv2.cvtColor(result_seg, cv2.COLOR_GRAY2RGB)
-
-    # RESULT
-    result = np.vstack((result_det, result_seg))
+    mask_pred = mask_to_image(mask_pred, mask_values)
+    mask = mask_to_image(mask, mask_values)
+    result = np.hstack((mask, mask_pred))
 
     if not args.no_save:
         cv2.imwrite(out_filename, result)
@@ -180,10 +149,6 @@ if __name__ == '__main__':
 
     if args.viz:
         logging.info(f'Visualizing results for image {in_filename}, close to continue...')
-        plt.figure(1)
-        plt.imshow(det_mask_pred)
-        plt.figure(2)
-        plt.imshow(result_pred)
-        # plt.imshow(result)
+        plt.imshow(result)
         plt.xticks([]), plt.yticks([])
         plt.show()

@@ -429,9 +429,9 @@ class Generic_UNetPlusPlus(SegmentationNetwork):
             seg_outputs_tuple = tuple([seg_outputs[-1]] + [i(j) for i, j in
                                                            zip(list(self.upscale_logits_ops)[::-1],
                                                                seg_outputs[:-1][::-1])])
-            return seg_outputs_tuple, seg_outputs_tuple
+            return seg_outputs_tuple
         else:
-            return seg_outputs[-1], seg_outputs[-1]
+            return seg_outputs[-1]
 
     # now lets build the localization pathway BACK_UP
     def create_nest(self, z, num_pool, final_num_features, num_conv_per_stage, basic_block, transpconv):

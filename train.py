@@ -1,16 +1,18 @@
 import argparse
 import logging
 import os
-from pathlib import Path
 import torch
-import wandb
+import torch.nn as nn
+import torch.nn.functional as F
+from pathlib import Path
 from torch import optim
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
+import wandb
 
 from evaluate import evaluate
 from utils.data_loading import CTCDataset
-from utils.loss import MultiTaskLoss
+from utils.dice_score import dice_loss
 from utils.utils import DATA_SET, select_model
 
 ds_name, radius = DATA_SET[3]
@@ -27,13 +29,12 @@ def train_model(
         learning_rate: float = 1e-5,
         val_percent: float = 0.1,
         save_checkpoint: bool = True,
-        scale: float = 1.0,
+        img_scale: float = 0.5,
         amp: bool = False,
         weight_decay: float = 1e-8,
         momentum: float = 0.999,
         gradient_clipping: float = 1.0,
         net_name: str = 'unet',
-        mtl_weight: float = 0.5
 ):
     # 2. Split into train / validation partitions
     n_val = int(len(dataset) * val_percent)
@@ -49,7 +50,7 @@ def train_model(
     experiment = wandb.init(project='U-Net', resume='allow', anonymous='must')
     experiment.config.update(
         dict(epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
-             val_percent=val_percent, save_checkpoint=save_checkpoint, img_size=scale, amp=amp)
+             val_percent=val_percent, save_checkpoint=save_checkpoint, img_size=img_scale, amp=amp)
     )
 
     logging.info(f'''Starting training:
@@ -60,7 +61,7 @@ def train_model(
         Validation size: {n_val}
         Checkpoints:     {save_checkpoint}
         Device:          {device.type}
-        Downscaling:     {scale}
+        Images scaling:  {img_scale}
         Mixed Precision: {amp}
     ''')
 
@@ -70,9 +71,7 @@ def train_model(
     # optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9, weight_decay=0.0001)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
-    # criterion = nn.CrossEntropyLoss() if model.n_classes > 1 else nn.BCEWithLogitsLoss()
-    det_loss_fn = MultiTaskLoss(model.n_classes, task='DET')
-    seg_loss_fn = MultiTaskLoss(model.n_classes, task='SEG')
+    criterion = nn.CrossEntropyLoss() if model.n_classes > 1 else nn.BCEWithLogitsLoss()
     global_step = 0
 
     # 5. Begin training
@@ -81,7 +80,7 @@ def train_model(
         epoch_loss = 0
         with tqdm(total=n_train, desc=f'Epoch {epoch}/{epochs}', unit='img') as pbar:
             for batch in train_loader:
-                images, mask_det, mask_seg = batch['image'], batch['det_mask'], batch['seg_mask']
+                images, true_masks = batch['image'], batch['mask']
 
                 assert images.shape[1] == model.n_channels, \
                     f'Network has been defined with {model.n_channels} input channels, ' \
@@ -89,26 +88,20 @@ def train_model(
                     'the images are loaded correctly.'
 
                 images = images.to(device=device, dtype=torch.float32, memory_format=torch.channels_last)
-                mask_det = mask_det.to(device=device, dtype=torch.long)
-                mask_seg = mask_seg.to(device=device, dtype=torch.long)
+                true_masks = true_masks.to(device=device, dtype=torch.long)
 
                 with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
-                    pred_det, pred_seg = model(images)
-                    # mask_seg, mask_det = true_masks[:, 0, ...], true_masks[:, 1, ...]
-                    # if model.n_classes == 1:
-                    #     loss_det = criterion(pred_det.squeeze(1), mask_det.float())
-                    #     loss_seg = 0.5 * criterion(pred_seg.squeeze(1), mask_seg.float()) + 0.5 * dice_loss(
-                    #         F.sigmoid(pred_seg.squeeze(1)), mask_seg.float(), multiclass=False)
-                    # else:
-                    #     loss_det = criterion(pred_det, mask_det)
-                    #     loss_seg = 0.5 * criterion(pred_seg, mask_seg) + 0.5 * dice_loss(
-                    #         F.softmax(pred_seg, dim=1).float(),
-                    #         F.one_hot(mask_seg, model.n_classes).permute(0, 3, 1, 2).float(),
-                    #         multiclass=True
-                    #     )
-                    loss_det = det_loss_fn(pred_det, mask_det)
-                    loss_seg = seg_loss_fn(pred_seg, mask_seg)
-                    loss = (1 - mtl_weight) * loss_det + mtl_weight * loss_seg
+                    masks_pred = model(images)
+                    if model.n_classes == 1:
+                        loss = criterion(masks_pred.squeeze(1), true_masks.float())
+                        loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), true_masks.float(), multiclass=False)
+                    else:
+                        loss = criterion(masks_pred, true_masks)
+                        loss += dice_loss(
+                            F.softmax(masks_pred, dim=1).float(),
+                            F.one_hot(true_masks, model.n_classes).permute(0, 3, 1, 2).float(),
+                            multiclass=True
+                        )
 
                 optimizer.zero_grad(set_to_none=True)
                 grad_scaler.scale(loss).backward()
@@ -125,9 +118,6 @@ def train_model(
                     'epoch': epoch
                 })
                 pbar.set_postfix(**{'loss (batch)': loss.item()})
-
-                if mtl_weight == 0.0:
-                    continue
 
                 # Evaluation round
                 division_step = (n_train // (5 * batch_size))
@@ -151,10 +141,8 @@ def train_model(
                                 'validation Dice': val_score,
                                 'images': wandb.Image(images[0].cpu()),
                                 'masks': {
-                                    'true_seg': wandb.Image(mask_seg[0].float().cpu()),
-                                    'true_det': wandb.Image(mask_det[0].float().cpu()),
-                                    'pred_seg': wandb.Image(pred_seg.argmax(dim=1)[0].float().cpu()),
-                                    'pred_det': wandb.Image(pred_det.argmax(dim=1)[0].float().cpu()),
+                                    'true': wandb.Image(true_masks[0].float().cpu()),
+                                    'pred': wandb.Image(masks_pred.argmax(dim=1)[0].float().cpu()),
                                 },
                                 'step': global_step,
                                 'epoch': epoch,
@@ -164,8 +152,8 @@ def train_model(
                             pass
 
         if save_checkpoint:
-            dir_pth = dir_checkpoint / f'{net_name}_w{mtl_weight:.1f}_e{epochs}_bs{batch_size}' \
-                                       f'_lr{learning_rate}_s{scale:.1f}_amp{int(amp)}'
+            dir_pth = dir_checkpoint / f'{net_name}_e{epochs}_bs{batch_size}' \
+                                       f'_lr{learning_rate}_s{img_scale:.1f}_amp{int(amp)}'
             Path(dir_pth).mkdir(parents=True, exist_ok=True)
             torch.save(model.state_dict(), str(dir_pth / f'checkpoint_epoch{epoch}.pth'))
             logging.info(f'Checkpoint {epoch} saved!')
@@ -178,7 +166,7 @@ def get_args():
     parser.add_argument('--learning-rate', '-l', metavar='LR', type=float, default=1e-5,
                         help='Learning rate', dest='lr')
     parser.add_argument('--load', '-f', type=str, default=False, help='Load model from a .pth file')
-    parser.add_argument('--scale', '-s', type=float, default=1.0, help='Downscaling factor of the images')
+    parser.add_argument('--scale', '-s', type=float, default=0.5, help='Downscaling factor of the images')
     parser.add_argument('--validation', '-v', dest='val', type=float, default=10.0,
                         help='Percent of the data that is used as validation (0-100)')
     parser.add_argument('--amp', action='store_true', default=False, help='Use mixed precision')
@@ -186,8 +174,6 @@ def get_args():
     parser.add_argument('--channels', type=int, default=1, help='Number of channels; channels=3 for RGB images')
     parser.add_argument('--classes', '-c', type=int, default=2, help='Number of classes')
     parser.add_argument('--net-name', type=str, default='unet', help='select one model')
-    parser.add_argument('--mtl-weight', type=float, default=0.5,
-                        help='Weight of multi-task loss: w * SEG + (1-w) * DET')
     parser.add_argument('--patch-size', '-p', type=int, default=32, help='Patch size for ViT')
 
     return parser.parse_args()
@@ -214,35 +200,19 @@ if __name__ == '__main__':
     logging.info(f'Network:\n'
                  f'\t{model.n_channels} input channels\n'
                  f'\t{model.n_classes} output channels (classes)\n'
-                 # f'\t{"Bilinear" if model.bilinear else "Transposed conv"} upscaling'
                  )
 
     if args.load:
         state_dict = torch.load(args.load, map_location=device)
         model.load_state_dict(state_dict)
         logging.info(f'Model loaded from {args.load}')
-    # else:
-    #     model.load_from(weights=np.load(config_vit.pretrained_path))
-    #     logging.info(f'Model loaded from {config_vit.pretrained_path}')
 
     model.to(device=device)
     try:
         train_model(model=model, dataset=dataset, device=device, epochs=args.epochs, batch_size=args.batch_size,
-                    learning_rate=args.lr, val_percent=args.val / 100, scale=args.scale, amp=args.amp,
-                    net_name=args.net_name, mtl_weight=args.mtl_weight)
+                    learning_rate=args.lr, val_percent=args.val / 100, img_scale=args.scale, amp=args.amp,
+                    net_name=args.net_name)
     except torch.cuda.OutOfMemoryError:
         logging.error('Detected OutOfMemoryError! '
                       'Enabling checkpointing to reduce memory usage, but this slows down training. '
                       'Consider enabling AMP (--amp) for fast and memory efficient training')
-        # torch.cuda.empty_cache()
-        # model.use_checkpointing()
-        # train_model(
-        #     model=model,
-        #     epochs=args.epochs,
-        #     batch_size=args.batch_size,
-        #     learning_rate=args.lr,
-        #     device=device,
-        #     scale=args.scale,
-        #     val_percent=args.val / 100,
-        #     amp=args.amp
-        # )
