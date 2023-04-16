@@ -22,17 +22,18 @@ logger = logging.getLogger(__name__)
 
 
 class SwinUnet(nn.Module):
-    def __init__(self, config, img_size=224, n_classes=21843, n_channels=3, zero_head=False, vis=False):
+    def __init__(self, config, img_size=224, patch_size=16, n_classes=21843, n_channels=3, zero_head=False):
         super(SwinUnet, self).__init__()
         self.n_classes = n_classes
         self.img_size = img_size
+        self.patch_size = patch_size
         self.n_channels = n_channels
         self.zero_head = zero_head
         self.config = config
 
         self.swin_unet = SwinTransformerSys(img_size=self.img_size,
-                                            patch_size=config.MODEL.SWIN.PATCH_SIZE,
-                                            in_chans=config.MODEL.SWIN.IN_CHANS,
+                                            patch_size=self.patch_size,
+                                            in_chans=self.n_channels,
                                             num_classes=self.n_classes,
                                             embed_dim=config.MODEL.SWIN.EMBED_DIM,
                                             depths=config.MODEL.SWIN.DEPTHS,

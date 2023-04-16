@@ -417,13 +417,13 @@ class Generic_UNetPlusPlus(SegmentationNetwork):
         x0_4 = self.loc1[3](torch.cat([x0_0, x0_1, x0_2, x0_3, self.up1[3](x1_3)], 1))
         seg_outputs.append(self.final_nonlin(self.seg_outputs[-4](x0_4)))
 
-        x5_0 = self.conv_blocks_context[5](x4_0)
-        x4_1 = self.loc0[0](torch.cat([x4_0, self.up0[0](x5_0)], 1))
-        x3_2 = self.loc0[1](torch.cat([x3_0, x3_1, self.up0[1](x4_1)], 1))
-        x2_3 = self.loc0[2](torch.cat([x2_0, x2_1, x2_2, self.up0[2](x3_2)], 1))
-        x1_4 = self.loc0[3](torch.cat([x1_0, x1_1, x1_2, x1_3, self.up0[3](x2_3)], 1))
-        x0_5 = self.loc0[4](torch.cat([x0_0, x0_1, x0_2, x0_3, x0_4, self.up0[4](x1_4)], 1))
-        seg_outputs.append(self.final_nonlin(self.seg_outputs[-5](x0_5)))
+        # x5_0 = self.conv_blocks_context[5](x4_0)
+        # x4_1 = self.loc0[0](torch.cat([x4_0, self.up0[0](x5_0)], 1))
+        # x3_2 = self.loc0[1](torch.cat([x3_0, x3_1, self.up0[1](x4_1)], 1))
+        # x2_3 = self.loc0[2](torch.cat([x2_0, x2_1, x2_2, self.up0[2](x3_2)], 1))
+        # x1_4 = self.loc0[3](torch.cat([x1_0, x1_1, x1_2, x1_3, self.up0[3](x2_3)], 1))
+        # x0_5 = self.loc0[4](torch.cat([x0_0, x0_1, x0_2, x0_3, x0_4, self.up0[4](x1_4)], 1))
+        # seg_outputs.append(self.final_nonlin(self.seg_outputs[-5](x0_5)))
 
         if self._deep_supervision and self.do_ds:
             seg_outputs_tuple = tuple([seg_outputs[-1]] + [i(j) for i, j in

@@ -14,6 +14,7 @@ from evaluate import evaluate
 from utils.data_loading import CTCDataset
 from utils.dice_score import dice_loss
 from utils.utils import DATA_SET, select_model
+from utils.loss import LossFn
 
 ds_name, radius = DATA_SET[3]
 dir_ds = Path('./data/train/' + ds_name)
@@ -24,6 +25,7 @@ def train_model(
         model,
         dataset,
         device,
+        n_classes=2,
         epochs: int = 5,
         batch_size: int = 1,
         learning_rate: float = 1e-5,
@@ -71,7 +73,7 @@ def train_model(
     # optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9, weight_decay=0.0001)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
-    criterion = nn.CrossEntropyLoss() if model.n_classes > 1 else nn.BCEWithLogitsLoss()
+    loss_fn = LossFn(n_classes=n_classes)
     global_step = 0
 
     # 5. Begin training
@@ -92,16 +94,7 @@ def train_model(
 
                 with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
                     masks_pred = model(images)
-                    if model.n_classes == 1:
-                        loss = criterion(masks_pred.squeeze(1), true_masks.float())
-                        loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), true_masks.float(), multiclass=False)
-                    else:
-                        loss = criterion(masks_pred, true_masks)
-                        loss += dice_loss(
-                            F.softmax(masks_pred, dim=1).float(),
-                            F.one_hot(true_masks, model.n_classes).permute(0, 3, 1, 2).float(),
-                            multiclass=True
-                        )
+                    loss = loss_fn(masks_pred, true_masks)
 
                 optimizer.zero_grad(set_to_none=True)
                 grad_scaler.scale(loss).backward()
@@ -209,9 +202,9 @@ if __name__ == '__main__':
 
     model.to(device=device)
     try:
-        train_model(model=model, dataset=dataset, device=device, epochs=args.epochs, batch_size=args.batch_size,
-                    learning_rate=args.lr, val_percent=args.val / 100, img_scale=args.scale, amp=args.amp,
-                    net_name=args.net_name)
+        train_model(model=model, dataset=dataset, device=device, n_classes=args.classes, epochs=args.epochs,
+                    batch_size=args.batch_size, learning_rate=args.lr, val_percent=args.val / 100,
+                    img_scale=args.scale, amp=args.amp, net_name=args.net_name)
     except torch.cuda.OutOfMemoryError:
         logging.error('Detected OutOfMemoryError! '
                       'Enabling checkpointing to reduce memory usage, but this slows down training. '

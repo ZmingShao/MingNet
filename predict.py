@@ -141,7 +141,7 @@ if __name__ == '__main__':
 
     mask_pred = mask_to_image(mask_pred, mask_values)
     mask = mask_to_image(mask, mask_values)
-    result = np.hstack((mask, mask_pred))
+    result = np.hstack((mask, img, mask_pred))
 
     if not args.no_save:
         cv2.imwrite(out_filename, result)

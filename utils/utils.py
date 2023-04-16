@@ -1,6 +1,3 @@
-import matplotlib.pyplot as plt
-import numpy as np
-import cv2
 import torch.nn as nn
 
 from networks.ming_net import MingNet
@@ -8,27 +5,6 @@ from networks.trans_unet import VisionTransformer, CONFIGS as CONFIGS_vit
 from networks.unet import UNet
 from networks.swin_unet import SwinUnet, get_config as get_config_swin
 from networks.unet_plus_plus import Generic_UNetPlusPlus, softmax_helper
-
-
-def det_vis(img, mask, mask_values, radius=3):
-    if len(img.shape) == 2:
-        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-    colors = [(255, 0, 0), (0, 0, 255)]
-    for i, v in enumerate(mask_values[1:]):
-        cnts, _ = cv2.findContours(np.uint8(mask == v), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-        for cnt in cnts:
-            # area_true = np.pi * radius ** 2
-            # if cv2.contourArea(cnt) < area_true * 0.3 and radius > 5:
-            #     continue
-            M = cv2.moments(cnt)
-            if M['m00'] != 0:
-                center = (int(M['m10'] / M['m00']), int(M['m01'] / M['m00']))
-            else:
-                while isinstance(cnt[0], np.ndarray):
-                    cnt = cnt[0]
-                center = cnt
-            cv2.circle(img, center, 1, colors[i], -1)
-    return img
 
 
 def select_model(args):
@@ -46,8 +22,7 @@ def select_model(args):
         config_vit.n_classes = args.classes
         config_vit.n_skip = 3
         if net_name.find('R50') != -1:
-            config_vit.patches.grid = (
-                int(args.scale / 16), int(args.scale / 16))
+            config_vit.patches.grid = tuple(map(lambda x: x // 16, args.img_size))
         model = VisionTransformer(config_vit,
                                   img_size=args.img_size,
                                   n_classes=args.classes,
@@ -55,7 +30,7 @@ def select_model(args):
     elif args.net_name == 'swin_unet':
         args.cfg = 'networks/swin_unet/swin_tiny_patch4_window7_224_lite.yaml'
         config_swin = get_config_swin(args)
-        model = SwinUnet(config_swin, args.img_size, args.classes, args.channels)
+        model = SwinUnet(config_swin, args.img_size, args.patch_size, args.classes, args.channels)
     elif args.net_name == 'unet_pp':
         dropout_op = nn.Dropout2d
         norm_op = nn.InstanceNorm2d
