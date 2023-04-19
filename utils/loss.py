@@ -47,16 +47,29 @@ class FocalLoss(nn.Module):
         return self.neg_loss(out[:, 1:, ...], target)
 
 
+class BalancedCELoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, pred: torch.FloatTensor, gt: torch.LongTensor):
+        _, value_counts = gt.unique(return_counts=True)
+        total_counts = gt.flatten().size(0)
+        weight = 1 - value_counts / total_counts
+        ce_loss = nn.CrossEntropyLoss(weight=weight)
+        return ce_loss(pred, gt)
+
+
 class LossFn(nn.Module):
     def __init__(self, n_classes):
         super().__init__()
         self.ce_loss = nn.CrossEntropyLoss()
         self.focal_loss = FocalLoss()
+        self.balanced_ce_loss = BalancedCELoss()
         self.loss = lambda pred, mask: 0.5 * self.ce_loss(pred, mask) + 0.5 * dice_loss(
             F.softmax(pred, dim=1).float(),
             F.one_hot(mask, n_classes).permute(0, 3, 1, 2).float(),
             multiclass=True
-            )
+        )
 
     def forward(self, pred, mask):
         assert isinstance(mask, torch.Tensor), 'The GT mask must be `Tensor`'

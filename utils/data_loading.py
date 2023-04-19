@@ -22,24 +22,22 @@ def load_image(filename: Path):
 
 class CTCDataset(Dataset):
     def __init__(self, ds_dir, scale=1.0, n_classes=2, patch_size=32):
-        self.images_dir = {'01': Path(ds_dir) / '01', '02': Path(ds_dir) / '02'}
-        self.masks_dir = {'01': Path(ds_dir) / '01_ST/SEG', '02': Path(ds_dir) / '02_ST/SEG'}
+        self.images_dir = Path(ds_dir) / 'images'
+        self.masks_dir = Path(ds_dir) / 'masks'
         self.n_classes = n_classes
         self.scale = scale
         self.patch_size = patch_size
 
-        self.ids = {
-            '01': [file.stem for file in self.images_dir['01'].glob('*.tif')],
-            '02': [file.stem for file in self.images_dir['02'].glob('*.tif')]}
+        self.ids = [file.name for file in self.images_dir.glob('*.tif')]
         if not self.ids:
             raise RuntimeError(f'No input file found in {self.images_dir}, make sure you put your images there')
-        logging.info(f'Creating dataset with {len(self.ids["01"] + self.ids["02"])} examples')
+        logging.info(f'Creating dataset with {len(self)} examples')
 
     def __len__(self):
-        return len(self.ids['01'] + self.ids['02'])
+        return len(self.ids)
 
     def image_size(self):
-        img_path = list(self.images_dir['01'].glob('*.tif'))[0]
+        img_path = list(self.images_dir.glob('*.tif'))[0]
         img = load_image(img_path)
         scaled_size = tuple(map(lambda x: int(x * self.scale), img.shape[:2]))
         padded_size = tuple(s - s % self.patch_size for s in scaled_size)
@@ -71,14 +69,9 @@ class CTCDataset(Dataset):
         return img
 
     def __getitem__(self, idx):
-        if idx < len(self.ids['01']):
-            flag = '01'
-        else:
-            flag = '02'
-            idx -= len(self.ids['01'])
-        name = self.ids[flag][idx]
-        img_file = list(self.images_dir[flag].glob(name + '.tif'))
-        mask_file = list(self.masks_dir[flag].glob(name.replace('t', 'man_seg') + '.tif'))
+        name = self.ids[idx]
+        img_file = list(self.images_dir.glob(name))
+        mask_file = list(self.masks_dir.glob(name))
 
         assert len(img_file) == 1, f'Either no image or multiple images found for the ID {name}: {img_file}'
         assert len(mask_file) == 1, f'Either no mask or multiple masks found for the ID {name}: {mask_file}'

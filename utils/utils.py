@@ -51,12 +51,12 @@ def select_model(args):
     return model
 
 
-DATA_SET = {0: ("Fluo-N2DH-SIM+", 10),
-            1: ("Fluo-C2DL-MSC", 10),
-            2: ("Fluo-N2DH-GOWT1", 20),
-            3: ("PhC-C2DL-PSC", 5),
-            4: ("BF-C2DL-HSC", 10),
-            5: ("Fluo-N2DL-HeLa", 10),
-            6: ("BF-C2DL-MuSC", 10),
-            7: ("DIC-C2DH-HeLa", 10),
-            8: ("PhC-C2DH-U373", 15)}
+DATA_SET = {0: "Fluo-N2DH-SIM+",
+            1: "Fluo-C2DL-MSC",
+            2: "Fluo-N2DH-GOWT1",
+            3: "PhC-C2DL-PSC",
+            4: "BF-C2DL-HSC",
+            5: "Fluo-N2DL-HeLa",
+            6: "BF-C2DL-MuSC",
+            7: "DIC-C2DH-HeLa",
+            8: "PhC-C2DH-U373"}

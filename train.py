@@ -16,8 +16,8 @@ from utils.data_loading import CTCDataset
 from utils.utils import DATA_SET, select_model
 from utils.loss import LossFn
 
-ds_name, radius = DATA_SET[3]
-dir_ds = Path.cwd() / ('data/train/' + ds_name)
+ds_name = DATA_SET[3]
+dir_ds = Path.cwd() / ('data/train/' + ds_name + '/augmented')
 dir_results = Path.cwd() / ('results/' + ds_name)
 
 
@@ -32,6 +32,7 @@ def train_model(
         learning_rate: float = 1e-5,
         val_percent: float = 0.1,
         img_scale: float = 0.5,
+        img_size: int = 512,
         amp: bool = False,
         weight_decay: float = 1e-8,
         momentum: float = 0.999,
@@ -65,6 +66,7 @@ def train_model(
         Validation size: {n_val}
         Device:          {device.type}
         Images scaling:  {img_scale}
+        Images size:     {img_size}
         Mixed Precision: {amp}
     ''')
 
@@ -235,6 +237,7 @@ if __name__ == '__main__':
                     learning_rate=args.lr,
                     val_percent=args.val / 100,
                     img_scale=args.scale,
+                    img_size=args.img_size,
                     amp=args.amp,
                     net_name=args.net_name,
                     save_results=args.save_results)

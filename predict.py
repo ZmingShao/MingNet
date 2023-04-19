@@ -13,7 +13,7 @@ from utils.utils import DATA_SET, select_model
 
 os.environ['NUMEXPR_MAX_THREADS'] = '16'
 
-ds_name, radius = DATA_SET[3]
+ds_name = DATA_SET[3]
 dir_img = Path.cwd() / ('data/train/' + ds_name + '/01')
 dir_seg = Path.cwd() / ('data/train/' + ds_name + '/01_ST/SEG')
 dir_track = Path.cwd() / ('data/train/' + ds_name + '/01_GT/TRA')
