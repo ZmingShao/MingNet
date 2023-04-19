@@ -9,16 +9,16 @@ from torch import optim
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 import wandb
+import csv
 
 from evaluate import evaluate
 from utils.data_loading import CTCDataset
-from utils.dice_score import dice_loss
 from utils.utils import DATA_SET, select_model
 from utils.loss import LossFn
 
 ds_name, radius = DATA_SET[3]
-dir_ds = Path('./data/train/' + ds_name)
-dir_checkpoint = Path('./checkpoints/' + ds_name)
+dir_ds = Path.cwd() / ('data/train/' + ds_name)
+dir_results = Path.cwd() / ('results/' + ds_name)
 
 
 def train_model(
@@ -28,15 +28,16 @@ def train_model(
         n_classes=2,
         epochs: int = 5,
         batch_size: int = 1,
+        patch_size: int = 32,
         learning_rate: float = 1e-5,
         val_percent: float = 0.1,
-        save_checkpoint: bool = True,
         img_scale: float = 0.5,
         amp: bool = False,
         weight_decay: float = 1e-8,
         momentum: float = 0.999,
         gradient_clipping: float = 1.0,
         net_name: str = 'unet',
+        save_results: bool = False,
 ):
     # 2. Split into train / validation partitions
     n_val = int(len(dataset) * val_percent)
@@ -52,20 +53,29 @@ def train_model(
     experiment = wandb.init(project='U-Net', resume='allow', anonymous='must')
     experiment.config.update(
         dict(epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
-             val_percent=val_percent, save_checkpoint=save_checkpoint, img_size=img_scale, amp=amp)
+             val_percent=val_percent, img_size=img_scale, amp=amp)
     )
 
     logging.info(f'''Starting training:
         Epochs:          {epochs}
         Batch size:      {batch_size}
+        Patch size:      {patch_size}
         Learning rate:   {learning_rate}
         Training size:   {n_train}
         Validation size: {n_val}
-        Checkpoints:     {save_checkpoint}
         Device:          {device.type}
         Images scaling:  {img_scale}
         Mixed Precision: {amp}
     ''')
+
+    # (path to save results)
+    if save_results:
+        dir_pth = dir_results / f'segment_{net_name}_e{epochs}_bs{batch_size}_p{patch_size}' \
+                                f'_lr{learning_rate}_s{img_scale:.1f}_amp{int(amp)}'
+        Path(dir_pth).mkdir(parents=True, exist_ok=True)
+        csv_file = (dir_pth / 'result.csv').open('w')
+        csv_wrt = csv.writer(csv_file)
+        csv_wrt.writerow(['Epoch', 'Loss', 'Dice'])
 
     # 4. Set up the optimizer, the loss, the learning rate scheduler and the loss scaling for AMP
     optimizer = optim.RMSprop(model.parameters(),
@@ -77,9 +87,10 @@ def train_model(
     global_step = 0
 
     # 5. Begin training
+    val_score_list = []
     for epoch in range(1, epochs + 1):
         model.train()
-        epoch_loss = 0
+        epoch_loss, val_score = [], 0
         with tqdm(total=n_train, desc=f'Epoch {epoch}/{epochs}', unit='img') as pbar:
             for batch in train_loader:
                 images, true_masks = batch['image'], batch['mask']
@@ -104,7 +115,8 @@ def train_model(
 
                 pbar.update(images.shape[0])
                 global_step += 1
-                epoch_loss += loss.item()
+                # epoch_loss += loss.item()
+                epoch_loss.append(loss.item())
                 experiment.log({
                     'train loss': loss.item(),
                     'step': global_step,
@@ -127,7 +139,7 @@ def train_model(
                         val_score = evaluate(model, val_loader, device, amp)
                         scheduler.step(val_score)
 
-                        logging.info('Validation Dice score: {}'.format(val_score))
+                        logging.info(f'Validation Dice score: {val_score}')
                         try:
                             experiment.log({
                                 'learning rate': optimizer.param_groups[0]['lr'],
@@ -144,12 +156,22 @@ def train_model(
                         except:
                             pass
 
-        if save_checkpoint:
-            dir_pth = dir_checkpoint / f'{net_name}_e{epochs}_bs{batch_size}' \
-                                       f'_lr{learning_rate}_s{img_scale:.1f}_amp{int(amp)}'
-            Path(dir_pth).mkdir(parents=True, exist_ok=True)
-            torch.save(model.state_dict(), str(dir_pth / f'checkpoint_epoch{epoch}.pth'))
-            logging.info(f'Checkpoint {epoch} saved!')
+        epoch_loss = sum(epoch_loss) / len(epoch_loss)
+        val_score = val_score.item()
+        if save_results:
+            csv_wrt.writerow([epoch, epoch_loss, val_score])
+            if len(val_score_list):
+                if val_score >= val_score_list[-1]:
+                    torch.save(model.state_dict(), str(dir_pth / f'best.pth'))
+        val_score_list.append(val_score)
+
+    best_score = max(val_score_list)
+    best_epoch = val_score_list.index(best_score) + 1
+    if save_results:
+        csv_file.close()
+        torch.save(model.state_dict(), str(dir_pth / f'last.pth'))
+        logging.info(f'Results saved in {dir_pth}')
+    logging.info(f'Best dice score: {best_score}, validated in epoch {best_epoch}')
 
 
 def get_args():
@@ -167,6 +189,7 @@ def get_args():
     parser.add_argument('--channels', type=int, default=1, help='Number of channels; channels=3 for RGB images')
     parser.add_argument('--classes', '-c', type=int, default=2, help='Number of classes')
     parser.add_argument('--net-name', type=str, default='unet', help='select one model')
+    parser.add_argument('--save-results', action='store_true', default=False, help='Save the training pth and csv')
     parser.add_argument('--patch-size', '-p', type=int, default=32, help='Patch size for ViT')
 
     return parser.parse_args()
@@ -202,9 +225,19 @@ if __name__ == '__main__':
 
     model.to(device=device)
     try:
-        train_model(model=model, dataset=dataset, device=device, n_classes=args.classes, epochs=args.epochs,
-                    batch_size=args.batch_size, learning_rate=args.lr, val_percent=args.val / 100,
-                    img_scale=args.scale, amp=args.amp, net_name=args.net_name)
+        train_model(model=model,
+                    dataset=dataset,
+                    device=device,
+                    n_classes=args.classes,
+                    epochs=args.epochs,
+                    batch_size=args.batch_size,
+                    patch_size=args.patch_size,
+                    learning_rate=args.lr,
+                    val_percent=args.val / 100,
+                    img_scale=args.scale,
+                    amp=args.amp,
+                    net_name=args.net_name,
+                    save_results=args.save_results)
     except torch.cuda.OutOfMemoryError:
         logging.error('Detected OutOfMemoryError! '
                       'Enabling checkpointing to reduce memory usage, but this slows down training. '

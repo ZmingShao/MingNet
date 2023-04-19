@@ -42,7 +42,7 @@ class CTCDataset(Dataset):
         img_path = list(self.images_dir['01'].glob('*.tif'))[0]
         img = load_image(img_path)
         scaled_size = tuple(map(lambda x: int(x * self.scale), img.shape[:2]))
-        padded_size = tuple(s + self.patch_size - s % self.patch_size for s in scaled_size)
+        padded_size = tuple(s - s % self.patch_size for s in scaled_size)
         return padded_size
 
     @staticmethod
@@ -50,9 +50,12 @@ class CTCDataset(Dataset):
         new_shape = tuple(map(lambda x: int(x * scale), img.shape[:2]))
         img = cv2.resize(img, new_shape[::-1],
                          interpolation=cv2.INTER_NEAREST if flag != 'image' else cv2.INTER_CUBIC)
-        pad_y, pad_x = map(lambda x: patch_size - x % patch_size, new_shape)
-        img = np.pad(img, pad_width=((pad_y // 2, pad_y - pad_y // 2),
-                                     (pad_x // 2, pad_x - pad_x // 2)))
+        # pad_y, pad_x = map(lambda x: patch_size - x % patch_size, new_shape)
+        # img = np.pad(img, pad_width=((pad_y // 2, pad_y - pad_y // 2),
+        #                              (pad_x // 2, pad_x - pad_x // 2)))
+        diff_y, diff_x = map(lambda x: x % patch_size, new_shape)
+        img = img[diff_y // 2: new_shape[0] - (diff_y - diff_y // 2),
+                  diff_x // 2: new_shape[1] - (diff_x - diff_x // 2)]
 
         if flag == 'mask':
             img = np.uint8(img > 0)

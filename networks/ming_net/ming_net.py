@@ -1,40 +1,41 @@
-import torch
-
 from ..unet.unet_parts import *
-from .trans_part import SmallDatasetViT
+from .trans_parts import SmallDatasetViT
 
 
 class MingNet(nn.Module):
-    def __init__(self, n_channels, n_classes, img_size, patch_size=32, bilinear=False):
+    def __init__(self, in_channels, n_classes, img_size, patch_size=32):
         super(MingNet, self).__init__()
-        self.n_channels = n_channels
+        self.n_channels = in_channels
         self.n_classes = n_classes
-        self.bilinear = bilinear
+        self.num_pool = 4
+        self.scale = 2 ** self.num_pool
+        self.base_channels = 64
+        assert patch_size % self.scale == 0, \
+            f"Patch size should be able to downscale {self.num_pool} times"
 
-        factor = 2 if bilinear else 1
+        self.inc = DoubleConv(in_channels, self.base_channels)
+        self.down = nn.ModuleList([Down(self.base_channels * 2 ** i,
+                                        self.base_channels * 2 ** (i + 1))
+                                   for i in range(self.num_pool)])
 
-        self.inc = (DoubleConv(n_channels, 64))
-        self.down1 = (Down(64, 128))
-        self.down2 = (Down(128, 256))
-        self.down3 = (Down(256, 512 // factor))
+        self.transformer = SmallDatasetViT(self.base_channels * self.scale,
+                                           image_size=tuple(map(lambda x: x // self.scale, img_size)),
+                                           patch_size=patch_size // self.scale)
 
-        self.transformer = SmallDatasetViT(512 // factor,
-                                           image_size=tuple(map(lambda x: x // 8, img_size)),
-                                           patch_size=patch_size // 8)
+        self.up = nn.ModuleList([Up(self.base_channels * 2 ** i,
+                                    self.base_channels * 2 ** (i - 1), bilinear=False)
+                                 for i in range(self.num_pool, 0, -1)])
 
-        self.up3 = (Up(512, 256 // factor, bilinear))
-        self.up2 = (Up(256, 128 // factor, bilinear))
-        self.up1 = (Up(128, 64, bilinear))
-        self.outc = (OutConv(64, n_classes))
+        self.outc = OutConv(self.base_channels, n_classes)
 
     def forward(self, x):
-        x1 = self.inc(x)
-        x2 = self.down1(x1)
-        x3 = self.down2(x2)
-        x = self.down3(x3)
+        x = self.inc(x)
+        feat = []
+        for d in self.down:
+            feat.append(x)
+            x = d(x)
         x = self.transformer(x)
-        x = self.up3(x, x3)
-        x = self.up2(x, x2)
-        x = self.up1(x, x1)
-        logits = self.outc(x)
-        return logits
+        for i, u in enumerate(self.up):
+            x = u(x, feat[::-1][i])
+        x = self.outc(x)
+        return x

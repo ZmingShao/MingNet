@@ -14,10 +14,10 @@ from utils.utils import DATA_SET, select_model
 os.environ['NUMEXPR_MAX_THREADS'] = '16'
 
 ds_name, radius = DATA_SET[3]
-dir_img = Path('./data/train/' + ds_name + '/01')
-dir_seg = Path('./data/train/' + ds_name + '/01_ST/SEG')
-dir_track = Path('./data/train/' + ds_name + '/01_GT/TRA')
-dir_checkpoint = Path('./checkpoints/' + ds_name)
+dir_img = Path.cwd() / ('data/train/' + ds_name + '/01')
+dir_seg = Path.cwd() / ('data/train/' + ds_name + '/01_ST/SEG')
+dir_track = Path.cwd() / ('data/train/' + ds_name + '/01_GT/TRA')
+dir_results = Path.cwd() / ('results/' + ds_name)
 
 
 def predict_img(net,
@@ -110,9 +110,9 @@ if __name__ == '__main__':
     args.img_size = img.shape[-2:]
     net = select_model(args)
 
-    dir_pth = dir_checkpoint / f'{args.net_name}_e{args.epochs}' \
-                               f'_bs{args.batch_size}_lr{args.lr}' \
-                               f'_s{args.scale:.1f}_amp{int(args.amp)}'
+    dir_pth = dir_results / f'segment_{args.net_name}_e{args.epochs}' \
+                            f'_bs{args.batch_size}_p{args.patch_size}_lr{args.lr}' \
+                            f'_s{args.scale:.1f}_amp{int(args.amp)}'
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logging.info(f'Loading model {dir_pth / args.model}')
     logging.info(f'Using device {device}')

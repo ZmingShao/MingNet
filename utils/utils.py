@@ -9,11 +9,10 @@ from networks.unet_plus_plus import Generic_UNetPlusPlus, softmax_helper
 
 def select_model(args):
     if args.net_name == 'ming_net':
-        model = MingNet(n_channels=args.channels,
+        model = MingNet(in_channels=args.channels,
                         n_classes=args.classes,
                         img_size=args.img_size,
-                        patch_size=args.patch_size,
-                        bilinear=args.bilinear)
+                        patch_size=args.patch_size)
     elif args.net_name == 'unet':
         model = UNet(n_channels=args.channels, n_classes=args.classes, bilinear=args.bilinear)
     elif args.net_name == 'trans_unet':
