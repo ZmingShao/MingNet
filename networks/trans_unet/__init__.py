@@ -1,1 +1,1 @@
-from .vit_seg_modeling import VisionTransformer, CONFIGS
+from .trans_unet import TransUnet

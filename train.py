@@ -16,8 +16,8 @@ from utils.data_loading import CTCDataset
 from utils.utils import DATA_SET, select_model
 from utils.loss import LossFn
 
-ds_name = DATA_SET[3]
-dir_ds = Path.cwd() / ('data/train/' + ds_name + '/augmented')
+ds_name = DATA_SET[5]
+dir_ds = Path.cwd() / ('data/train/' + ds_name)
 dir_results = Path.cwd() / ('results/' + ds_name)
 
 

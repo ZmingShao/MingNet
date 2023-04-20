@@ -1,9 +1,8 @@
 import torch.nn as nn
 
 from networks.ming_net import MingNet
-from networks.trans_unet import VisionTransformer, CONFIGS as CONFIGS_vit
+from networks.trans_unet import TransUnet
 from networks.unet import UNet
-from networks.swin_unet import SwinUnet, get_config as get_config_swin
 from networks.unet_plus_plus import Generic_UNetPlusPlus, softmax_helper
 
 
@@ -14,22 +13,12 @@ def select_model(args):
                         img_size=args.img_size,
                         patch_size=args.patch_size)
     elif args.net_name == 'unet':
-        model = UNet(n_channels=args.channels, n_classes=args.classes, bilinear=args.bilinear)
+        model = UNet(in_channels=args.channels, n_classes=args.classes)
     elif args.net_name == 'trans_unet':
-        net_name = 'R50-ViT-B_16'
-        config_vit = CONFIGS_vit[net_name]
-        config_vit.n_classes = args.classes
-        config_vit.n_skip = 3
-        if net_name.find('R50') != -1:
-            config_vit.patches.grid = tuple(map(lambda x: x // 16, args.img_size))
-        model = VisionTransformer(config_vit,
-                                  img_size=args.img_size,
-                                  n_classes=args.classes,
-                                  n_channels=args.channels)
-    elif args.net_name == 'swin_unet':
-        args.cfg = 'networks/swin_unet/swin_tiny_patch4_window7_224_lite.yaml'
-        config_swin = get_config_swin(args)
-        model = SwinUnet(config_swin, args.img_size, args.patch_size, args.classes, args.channels)
+        model = TransUnet(in_channels=args.channels,
+                          n_classes=args.classes,
+                          img_size=args.img_size,
+                          patch_size=args.patch_size)
     elif args.net_name == 'unet_pp':
         dropout_op = nn.Dropout2d
         norm_op = nn.InstanceNorm2d

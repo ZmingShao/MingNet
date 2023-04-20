@@ -6,6 +6,8 @@ from torch.utils.data import Dataset
 import tifffile
 import cv2
 
+from .data_pre import gen_ds, data_augment, clear_defective
+
 
 def load_image(filename: Path):
     ext = filename.suffix
@@ -22,8 +24,12 @@ def load_image(filename: Path):
 
 class CTCDataset(Dataset):
     def __init__(self, ds_dir, scale=1.0, n_classes=2, patch_size=32):
-        self.images_dir = Path(ds_dir) / 'images'
-        self.masks_dir = Path(ds_dir) / 'masks'
+        ds_dir = Path(ds_dir)
+        gen_ds(ds_dir)
+        augmented_dir = data_augment(ds_dir)
+        clear_defective(augmented_dir)
+        self.images_dir = augmented_dir / 'images'
+        self.masks_dir = augmented_dir / 'masks'
         self.n_classes = n_classes
         self.scale = scale
         self.patch_size = patch_size

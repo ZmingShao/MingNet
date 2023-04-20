@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import random
 from pathlib import Path
 import cv2
 import matplotlib.pyplot as plt
@@ -13,10 +14,9 @@ from utils.utils import DATA_SET, select_model
 
 os.environ['NUMEXPR_MAX_THREADS'] = '16'
 
-ds_name = DATA_SET[3]
-dir_img = Path.cwd() / ('data/train/' + ds_name + '/01')
-dir_seg = Path.cwd() / ('data/train/' + ds_name + '/01_ST/SEG')
-dir_track = Path.cwd() / ('data/train/' + ds_name + '/01_GT/TRA')
+ds_name = DATA_SET[0]
+dir_img = Path.cwd() / ('data/train/' + ds_name + '/augmented/images')
+dir_seg = Path.cwd() / ('data/train/' + ds_name + '/augmented/masks')
 dir_results = Path.cwd() / ('results/' + ds_name)
 
 
@@ -47,7 +47,7 @@ def get_args():
     parser.add_argument('--model', '-m', default='MODEL.pth', metavar='FILE',
                         help='Specify the file in which the model is stored')
     parser.add_argument('--epochs', '-e', metavar='E', type=int, default=5, help='Number of epochs')
-    parser.add_argument('--input', '-i', metavar='INPUT', type=str, help='Filenames of input images', required=True)
+    parser.add_argument('--input', '-i', metavar='INPUT', type=str, help='Filenames of input images')
     parser.add_argument('--output', '-o', metavar='OUTPUT', type=str, help='Filenames of output images')
     parser.add_argument('--batch-size', '-b', dest='batch_size', metavar='B', type=int, default=1, help='Batch size')
     parser.add_argument('--learning-rate', '-l', metavar='LR', type=float, default=1e-5,
@@ -98,12 +98,12 @@ if __name__ == '__main__':
     args = get_args()
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
-    in_filename = args.input
+    in_filename = args.input if args.input else random.choice(list(dir_img.glob('*.tif'))).name
     out_filename = get_output_filenames(args)
 
     logging.info(f'\nPredicting image {dir_img / in_filename} ...')
     img = tifffile.imread(dir_img / in_filename)
-    mask = tifffile.imread(dir_seg / ('man_seg' + in_filename[1:]))
+    mask = tifffile.imread(dir_seg / in_filename)
     img = CTCDataset.preprocess(img, flag='image', scale=args.scale, patch_size=args.patch_size)
     mask = CTCDataset.preprocess(mask, flag='mask', scale=args.scale, patch_size=args.patch_size)
 
