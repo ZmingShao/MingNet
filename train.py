@@ -16,7 +16,7 @@ from utils.data_loading import CTCDataset
 from utils.utils import DATA_SET, select_model
 from utils.loss import LossFn
 
-ds_name = DATA_SET[5]
+ds_name = DATA_SET[8]
 dir_ds = Path.cwd() / ('data/train/' + ds_name)
 dir_results = Path.cwd() / ('results/' + ds_name)
 
@@ -25,7 +25,7 @@ def train_model(
         model,
         dataset,
         device,
-        n_classes=2,
+        n_classes: int = 2,
         epochs: int = 5,
         batch_size: int = 1,
         patch_size: int = 32,
