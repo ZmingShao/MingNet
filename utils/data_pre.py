@@ -65,12 +65,12 @@ def data_augment(ds_dir: Path):
     return augmented_dir
 
 
-def clear_defective(ds_dir: Path, clear_th: int = 1000):
+def clear_defective(ds_dir: Path, clear_th: float = 0.1):
     images_dir = ds_dir / 'images'
     masks_dir = ds_dir / 'masks'
     for mask_path in masks_dir.glob('*.tif'):
         mask = tifffile.imread(mask_path)
-        if np.count_nonzero(mask) < clear_th:
+        if np.count_nonzero(mask) / mask.size < clear_th:
             mask_path.unlink()
             (images_dir / mask_path.name).unlink()
 

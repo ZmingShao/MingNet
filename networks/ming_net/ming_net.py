@@ -8,4 +8,4 @@ class MingNet(UNet):
         self.bottleneck = SmallDatasetViT(self.base_channels * self.scale,
                                           image_size=tuple(map(lambda x: x // self.scale, img_size)),
                                           patch_size=patch_size // self.scale,
-                                          depth=12)
+                                          depth=16)

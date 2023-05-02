@@ -20,7 +20,7 @@ from utils.loss import LossFn
 
 os.environ['NUMEXPR_MAX_THREADS'] = '16'
 
-ds_name = DATA_SET[0]
+ds_name = DATA_SET[8]
 dir_ds = Path.cwd() / ('data/train/' + ds_name)
 dir_results = Path.cwd() / ('results/' + ds_name)
 
@@ -45,12 +45,12 @@ def train_model(
         net_name: str = 'unet',
         save_results: bool = False,
 ):
-    # (Initialize logging)
-    experiment = wandb.init(project='U-Net', resume='allow', anonymous='must')
-    experiment.config.update(
-        dict(epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
-             val_percent=val_percent, img_size=img_scale, amp=amp)
-    )
+    # # (Initialize logging)
+    # experiment = wandb.init(project='U-Net', resume='allow', anonymous='must')
+    # experiment.config.update(
+    #     dict(epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
+    #          val_percent=val_percent, img_size=img_scale, amp=amp)
+    # )
 
     logging.info(f'''Starting training:
         Epochs:          {epochs}
@@ -78,7 +78,7 @@ def train_model(
     optimizer = optim.RMSprop(model.parameters(),
                               lr=learning_rate, weight_decay=weight_decay, momentum=momentum, foreach=True)
     # optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9, weight_decay=0.0001)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=1)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
     loss_fn = LossFn(n_classes=n_classes)
     global_step = 0
@@ -87,7 +87,7 @@ def train_model(
     val_score_list, epoch_loss_list = [], []
     for epoch in range(1, epochs + 1):
         model.train()
-        epoch_loss, val_score = [], 0
+        epoch_loss, val_score = [], torch.zeros(1)
         with tqdm(total=n_train, desc=f'Epoch {epoch}/{epochs}', unit='img') as pbar:
             for batch in train_loader:
                 images, true_masks = batch['image'], batch['mask']
@@ -112,49 +112,53 @@ def train_model(
 
                 pbar.update(images.shape[0])
                 global_step += 1
-                # epoch_loss += loss.item()
                 epoch_loss.append(loss.item())
-                experiment.log({
-                    'train loss': loss.item(),
-                    'step': global_step,
-                    'epoch': epoch
-                })
+                # epoch_loss += loss.item()
+                # experiment.log({
+                #     'train loss': loss.item(),
+                #     'step': global_step,
+                #     'epoch': epoch
+                # })
                 pbar.set_postfix(**{'loss (batch)': loss.item()})
 
-                # Evaluation round
-                division_step = (n_train // (5 * batch_size))
-                if division_step > 0:
-                    if global_step % division_step == 0:
-                        histograms = {}
-                        for tag, value in model.named_parameters():
-                            tag = tag.replace('/', '.')
-                            if not (torch.isinf(value) | torch.isnan(value)).any():
-                                histograms['Weights/' + tag] = wandb.Histogram(value.data.cpu())
-                            if not (torch.isinf(value.grad) | torch.isnan(value.grad)).any():
-                                histograms['Gradients/' + tag] = wandb.Histogram(value.grad.data.cpu())
+                # # Evaluation round
+                # division_step = (n_train // (5 * batch_size))
+                # if division_step > 0:
+                #     if global_step % division_step == 0:
+                #         histograms = {}
+                #         for tag, value in model.named_parameters():
+                #             tag = tag.replace('/', '.')
+                #             if not (torch.isinf(value) | torch.isnan(value)).any():
+                #                 histograms['Weights/' + tag] = wandb.Histogram(value.data.cpu())
+                #             if not (torch.isinf(value.grad) | torch.isnan(value.grad)).any():
+                #                 histograms['Gradients/' + tag] = wandb.Histogram(value.grad.data.cpu())
+                #
+                #         val_score = evaluate(model, val_loader, device, amp)
+                #         scheduler.step(val_score)
+                #
+                #         logging.info(f'Validation Dice score: {val_score}')
+                #         try:
+                #             experiment.log({
+                #                 'learning rate': optimizer.param_groups[0]['lr'],
+                #                 'validation Dice': val_score,
+                #                 'images': wandb.Image(images[0].cpu()),
+                #                 'masks': {
+                #                     'true': wandb.Image(true_masks[0].float().cpu()),
+                #                     'pred': wandb.Image(masks_pred.argmax(dim=1)[0].float().cpu()),
+                #                 },
+                #                 'step': global_step,
+                #                 'epoch': epoch,
+                #                 **histograms
+                #             })
+                #         except:
+                #             pass
 
-                        val_score = evaluate(model, val_loader, device, amp)
-                        scheduler.step(val_score)
+        val_score = evaluate(model, val_loader, device, amp)
+        scheduler.step(val_score)
+        logging.info(f'Validation Dice score: {val_score}')
 
-                        logging.info(f'Validation Dice score: {val_score}')
-                        try:
-                            experiment.log({
-                                'learning rate': optimizer.param_groups[0]['lr'],
-                                'validation Dice': val_score,
-                                'images': wandb.Image(images[0].cpu()),
-                                'masks': {
-                                    'true': wandb.Image(true_masks[0].float().cpu()),
-                                    'pred': wandb.Image(masks_pred.argmax(dim=1)[0].float().cpu()),
-                                },
-                                'step': global_step,
-                                'epoch': epoch,
-                                **histograms
-                            })
-                        except:
-                            pass
-
-        epoch_loss = sum(epoch_loss) / len(epoch_loss)
         val_score = val_score.item()
+        epoch_loss = sum(epoch_loss) / len(epoch_loss)
         if save_results:
             csv_wrt.writerow([epoch, epoch_loss, val_score])
             if len(val_score_list):
@@ -241,11 +245,13 @@ if __name__ == '__main__':
     train_set, val_set = random_split(dataset, [n_train, n_val], generator=torch.Generator().manual_seed(0))
 
     # 3. Create data loaders
-    loader_args = dict(batch_size=args.batch_size, num_workers=os.cpu_count(), pin_memory=True)
-    train_loader = DataLoader(train_set, shuffle=True, **loader_args)
-    val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **loader_args)
+    train_loader_args = dict(batch_size=args.batch_size, num_workers=os.cpu_count(), pin_memory=True)
+    val_loader_args = dict(batch_size=1, num_workers=os.cpu_count(), pin_memory=True)
+    train_loader = DataLoader(train_set, shuffle=True, **train_loader_args)
+    val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **val_loader_args)
 
     for i in range(len(args.networks)):
+        print('------------------------------------------------------')
         args.net_name = args.networks[i]
         args.img_size = dataset.image_size()
         model = select_model(args)
