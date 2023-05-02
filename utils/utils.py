@@ -48,4 +48,5 @@ DATA_SET = {0: "Fluo-N2DH-SIM+",
             5: "Fluo-N2DL-HeLa",
             6: "BF-C2DL-MuSC",
             7: "DIC-C2DH-HeLa",
-            8: "PhC-C2DH-U373"}
+            8: "PhC-C2DH-U373",
+            9: "Fluo-C2DL-Huh7"}

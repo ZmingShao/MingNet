@@ -1,5 +1,5 @@
 from ..unet import UNet
-from .trans_parts import SmallDatasetViT
+from ..vision_transformer import SmallDatasetViT
 
 
 class MingNet(UNet):
@@ -7,4 +7,5 @@ class MingNet(UNet):
         super(MingNet, self).__init__(in_channels, n_classes)
         self.bottleneck = SmallDatasetViT(self.base_channels * self.scale,
                                           image_size=tuple(map(lambda x: x // self.scale, img_size)),
-                                          patch_size=patch_size // self.scale)
+                                          patch_size=patch_size // self.scale,
+                                          depth=12)

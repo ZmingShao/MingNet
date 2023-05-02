@@ -1,5 +1,5 @@
 from ..unet import UNet
-from .trans_parts import ViT
+from ..vision_transformer import ViT
 
 
 class TransUnet(UNet):
@@ -7,5 +7,6 @@ class TransUnet(UNet):
         super(TransUnet, self).__init__(in_channels, n_classes)
         self.bottleneck = ViT(self.base_channels * self.scale,
                               image_size=tuple(map(lambda x: x // self.scale, img_size)),
-                              patch_size=patch_size // self.scale)
+                              patch_size=patch_size // self.scale,
+                              depth=12)
 

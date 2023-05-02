@@ -14,7 +14,7 @@ from utils.utils import DATA_SET, select_model
 
 os.environ['NUMEXPR_MAX_THREADS'] = '16'
 
-ds_name = DATA_SET[0]
+ds_name = DATA_SET[8]
 dir_img = Path.cwd() / ('data/train/' + ds_name + '/augmented/images')
 dir_seg = Path.cwd() / ('data/train/' + ds_name + '/augmented/masks')
 dir_results = Path.cwd() / ('results/' + ds_name)
@@ -70,13 +70,6 @@ def get_args():
     return parser.parse_args()
 
 
-def get_output_filenames(args):
-    def _generate_name(fn):
-        return f'{os.path.splitext(fn)[0]}_OUT.png'
-
-    return args.output or list(map(_generate_name, args.input))
-
-
 def mask_to_image(mask: np.ndarray, mask_values):
     if isinstance(mask_values[0], list):
         out = np.zeros((mask.shape[-2], mask.shape[-1], len(mask_values[0])), dtype=np.uint8)
@@ -98,8 +91,11 @@ if __name__ == '__main__':
     args = get_args()
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
+    dir_pth = dir_results / f'segment_{args.net_name}_e{args.epochs}' \
+                            f'_bs{args.batch_size}_p{args.patch_size}_lr{args.lr}' \
+                            f'_s{args.scale:.1f}_amp{int(args.amp)}'
     in_filename = args.input if args.input else random.choice(list(dir_img.glob('*.tif'))).name
-    out_filename = get_output_filenames(args)
+    out_filename = args.output if args.output else 'pred.png'
 
     logging.info(f'\nPredicting image {dir_img / in_filename} ...')
     img = tifffile.imread(dir_img / in_filename)
@@ -109,10 +105,6 @@ if __name__ == '__main__':
 
     args.img_size = img.shape[-2:]
     net = select_model(args)
-
-    dir_pth = dir_results / f'segment_{args.net_name}_e{args.epochs}' \
-                            f'_bs{args.batch_size}_p{args.patch_size}_lr{args.lr}' \
-                            f'_s{args.scale:.1f}_amp{int(args.amp)}'
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logging.info(f'Loading model {dir_pth / args.model}')
     logging.info(f'Using device {device}')
@@ -141,14 +133,26 @@ if __name__ == '__main__':
 
     mask_pred = mask_to_image(mask_pred, mask_values)
     mask = mask_to_image(mask, mask_values)
-    result = np.hstack((mask, img, mask_pred))
+
+    img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    mask_pred = cv2.cvtColor(mask_pred, cv2.COLOR_GRAY2BGR)
+    plt.rc('font', size=20)
+    fig, axes = plt.subplots(2, 1, figsize=(5, 10))
+    axes[0].imshow(img)
+    axes[0].set_title('origin image')
+    axes[0].set_xticks([]), axes[0].set_yticks([])
+    axes[1].imshow(mask_pred)
+    axes[1].set_title('predicted mask')
+    axes[1].set_xticks([]), axes[1].set_yticks([])
 
     if not args.no_save:
-        cv2.imwrite(out_filename, result)
-        logging.info(f'Mask saved to {out_filename}')
+        out_path = dir_pth / out_filename
+        # cv2.imwrite(str(out_path), result)
+        fig.savefig(str(out_path))
+        logging.info(f'Mask saved to {out_path}')
 
     if args.viz:
         logging.info(f'Visualizing results for image {in_filename}, close to continue...')
-        plt.imshow(result)
-        plt.xticks([]), plt.yticks([])
+        # plt.imshow(result)
+        # plt.xticks([]), plt.yticks([])
         plt.show()

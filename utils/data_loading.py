@@ -23,13 +23,13 @@ def load_image(filename: Path):
 
 
 class CTCDataset(Dataset):
-    def __init__(self, ds_dir, scale=1.0, n_classes=2, patch_size=32):
+    def __init__(self, ds_dir, scale=1.0, n_classes=2, patch_size=32, augment=False):
         ds_dir = Path(ds_dir)
         gen_ds(ds_dir)
-        augmented_dir = data_augment(ds_dir)
-        clear_defective(augmented_dir)
-        self.images_dir = augmented_dir / 'images'
-        self.masks_dir = augmented_dir / 'masks'
+        ds_dir = data_augment(ds_dir) if augment else ds_dir
+        clear_defective(ds_dir)
+        self.images_dir = ds_dir / 'images'
+        self.masks_dir = ds_dir / 'masks'
         self.n_classes = n_classes
         self.scale = scale
         self.patch_size = patch_size

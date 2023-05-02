@@ -10,20 +10,25 @@ from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 import wandb
 import csv
+import numpy as np
+import matplotlib.pyplot as plt
 
 from evaluate import evaluate
 from utils.data_loading import CTCDataset
 from utils.utils import DATA_SET, select_model
 from utils.loss import LossFn
 
-ds_name = DATA_SET[8]
+os.environ['NUMEXPR_MAX_THREADS'] = '16'
+
+ds_name = DATA_SET[0]
 dir_ds = Path.cwd() / ('data/train/' + ds_name)
 dir_results = Path.cwd() / ('results/' + ds_name)
 
 
 def train_model(
         model,
-        dataset,
+        train_loader,
+        val_loader,
         device,
         n_classes: int = 2,
         epochs: int = 5,
@@ -40,16 +45,6 @@ def train_model(
         net_name: str = 'unet',
         save_results: bool = False,
 ):
-    # 2. Split into train / validation partitions
-    n_val = int(len(dataset) * val_percent)
-    n_train = len(dataset) - n_val
-    train_set, val_set = random_split(dataset, [n_train, n_val], generator=torch.Generator().manual_seed(0))
-
-    # 3. Create data loaders
-    loader_args = dict(batch_size=batch_size, num_workers=os.cpu_count(), pin_memory=True)
-    train_loader = DataLoader(train_set, shuffle=True, **loader_args)
-    val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **loader_args)
-
     # (Initialize logging)
     experiment = wandb.init(project='U-Net', resume='allow', anonymous='must')
     experiment.config.update(
@@ -89,7 +84,7 @@ def train_model(
     global_step = 0
 
     # 5. Begin training
-    val_score_list = []
+    val_score_list, epoch_loss_list = [], []
     for epoch in range(1, epochs + 1):
         model.train()
         epoch_loss, val_score = [], 0
@@ -166,12 +161,36 @@ def train_model(
                 if val_score >= val_score_list[-1]:
                     torch.save(model.state_dict(), str(dir_pth / f'best.pth'))
         val_score_list.append(val_score)
+        epoch_loss_list.append(epoch_loss)
 
     best_score = max(val_score_list)
     best_epoch = val_score_list.index(best_score) + 1
+
+    # Visualize
+    epoch_list = np.arange(1, epochs + 1)
+    epoch_loss_list = np.array(epoch_loss_list)
+    val_score_list = np.array(val_score_list) * 100
+
+    fig, ax_loss = plt.subplots()
+    ax_loss.plot(epoch_list, epoch_loss_list, 'b-', label='loss')
+    ax_loss.set_xticks(np.arange(0, epochs + 1, epochs // 5))
+    ax_loss.set_xlabel('epoch')
+    ax_loss.set_ylabel('loss')
+    # ax_loss.spines['right'].set_visible(False)
+    h_loss, l_loss = ax_loss.get_legend_handles_labels()
+
+    ax_dice = ax_loss.twinx()
+    ax_dice.plot(epoch_list, val_score_list, 'g-o', label='dice')
+    ax_dice.set_ylabel('dice(%)')
+    h_dice, l_dice = ax_dice.get_legend_handles_labels()
+
+    plt.legend(h_loss + h_dice, l_loss + l_dice, loc='best')
+    plt.show()
+
     if save_results:
         csv_file.close()
-        torch.save(model.state_dict(), str(dir_pth / f'last.pth'))
+        torch.save(model.state_dict(), str(dir_pth / 'last.pth'))
+        fig.savefig(str(dir_pth / 'visualize.png'))
         logging.info(f'Results saved in {dir_pth}')
     logging.info(f'Best dice score: {best_score}, validated in epoch {best_epoch}')
 
@@ -190,9 +209,10 @@ def get_args():
     parser.add_argument('--bilinear', action='store_true', default=False, help='Use bilinear upsampling')
     parser.add_argument('--channels', type=int, default=1, help='Number of channels; channels=3 for RGB images')
     parser.add_argument('--classes', '-c', type=int, default=2, help='Number of classes')
-    parser.add_argument('--net-name', type=str, default='unet', help='select one model')
+    parser.add_argument('--networks', nargs='+', help='select model(s) to train')
     parser.add_argument('--save-results', action='store_true', default=False, help='Save the training pth and csv')
     parser.add_argument('--patch-size', '-p', type=int, default=32, help='Patch size for ViT')
+    parser.add_argument('--augment', action='store_true', default=False, help='Use data augmentation')
 
     return parser.parse_args()
 
@@ -206,42 +226,59 @@ if __name__ == '__main__':
 
     # 1. Create dataset
     try:
-        dataset = CTCDataset(dir_ds, args.scale, args.classes, args.patch_size)
+        dataset = CTCDataset(ds_dir=dir_ds,
+                             scale=args.scale,
+                             n_classes=args.classes,
+                             patch_size=args.patch_size,
+                             augment=args.augment)
     except (AssertionError, RuntimeError, IndexError) as e:
         logging.error(e)
         exit(-1)
 
-    args.img_size = dataset.image_size()
-    model = select_model(args)
-    model = model.to(memory_format=torch.channels_last)
+    # 2. Split into train / validation partitions
+    n_val = int(len(dataset) * args.val / 100)
+    n_train = len(dataset) - n_val
+    train_set, val_set = random_split(dataset, [n_train, n_val], generator=torch.Generator().manual_seed(0))
 
-    logging.info(f'Network:\n'
-                 f'\t{model.n_channels} input channels\n'
-                 f'\t{model.n_classes} output channels (classes)\n'
-                 )
+    # 3. Create data loaders
+    loader_args = dict(batch_size=args.batch_size, num_workers=os.cpu_count(), pin_memory=True)
+    train_loader = DataLoader(train_set, shuffle=True, **loader_args)
+    val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **loader_args)
 
-    if args.load:
-        state_dict = torch.load(args.load, map_location=device)
-        model.load_state_dict(state_dict)
-        logging.info(f'Model loaded from {args.load}')
+    for i in range(len(args.networks)):
+        args.net_name = args.networks[i]
+        args.img_size = dataset.image_size()
+        model = select_model(args)
+        model = model.to(memory_format=torch.channels_last)
 
-    model.to(device=device)
-    try:
-        train_model(model=model,
-                    dataset=dataset,
-                    device=device,
-                    n_classes=args.classes,
-                    epochs=args.epochs,
-                    batch_size=args.batch_size,
-                    patch_size=args.patch_size,
-                    learning_rate=args.lr,
-                    val_percent=args.val / 100,
-                    img_scale=args.scale,
-                    img_size=args.img_size,
-                    amp=args.amp,
-                    net_name=args.net_name,
-                    save_results=args.save_results)
-    except torch.cuda.OutOfMemoryError:
-        logging.error('Detected OutOfMemoryError! '
-                      'Enabling checkpointing to reduce memory usage, but this slows down training. '
-                      'Consider enabling AMP (--amp) for fast and memory efficient training')
+        logging.info(f'Network: {args.net_name}\n'
+                     f'\t{model.n_channels} input channels\n'
+                     f'\t{model.n_classes} output channels (classes)\n'
+                     )
+
+        if args.load:
+            state_dict = torch.load(args.load, map_location=device)
+            model.load_state_dict(state_dict)
+            logging.info(f'Model loaded from {args.load}')
+
+        model.to(device=device)
+        try:
+            train_model(model=model,
+                        train_loader=train_loader,
+                        val_loader=val_loader,
+                        device=device,
+                        n_classes=args.classes,
+                        epochs=args.epochs,
+                        batch_size=args.batch_size,
+                        patch_size=args.patch_size,
+                        learning_rate=args.lr,
+                        val_percent=args.val / 100,
+                        img_scale=args.scale,
+                        img_size=args.img_size,
+                        amp=args.amp,
+                        net_name=args.net_name,
+                        save_results=args.save_results)
+        except torch.cuda.OutOfMemoryError:
+            logging.error('Detected OutOfMemoryError! '
+                          'Enabling checkpointing to reduce memory usage, but this slows down training. '
+                          'Consider enabling AMP (--amp) for fast and memory efficient training')
