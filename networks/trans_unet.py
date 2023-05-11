@@ -1,5 +1,5 @@
-from ..unet import UNet
-from ..vision_transformer import ViT
+from .unet import UNet
+from .vision_transformer import ViT
 
 
 class TransUnet(UNet):

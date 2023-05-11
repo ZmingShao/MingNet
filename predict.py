@@ -91,18 +91,21 @@ if __name__ == '__main__':
     args = get_args()
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
+    # Path of the pth file to load
     dir_pth = dir_results / f'segment_{args.net_name}_e{args.epochs}' \
                             f'_bs{args.batch_size}_p{args.patch_size}_lr{args.lr}' \
                             f'_s{args.scale:.1f}_amp{int(args.amp)}'
     in_filename = args.input if args.input else random.choice(list(dir_img.glob('*.tif'))).name
     out_filename = args.output if args.output else 'pred.png'
 
+    # Load data
     logging.info(f'\nPredicting image {dir_img / in_filename} ...')
     img = tifffile.imread(dir_img / in_filename)
     mask = tifffile.imread(dir_seg / in_filename)
     img = CTCDataset.preprocess(img, flag='image', scale=args.scale, patch_size=args.patch_size)
     mask = CTCDataset.preprocess(mask, flag='mask', scale=args.scale, patch_size=args.patch_size)
 
+    # Load model
     args.img_size = img.shape[-2:]
     net = select_model(args)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -116,6 +119,7 @@ if __name__ == '__main__':
 
     logging.info('Model loaded!')
 
+    # Inference model
     mask_pred = predict_img(net=net,
                             full_img=img,
                             out_threshold=args.mask_threshold,
@@ -134,6 +138,7 @@ if __name__ == '__main__':
     mask_pred = mask_to_image(mask_pred, mask_values)
     mask = mask_to_image(mask, mask_values)
 
+    # Visualize
     img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
     mask_pred = cv2.cvtColor(mask_pred, cv2.COLOR_GRAY2BGR)
     plt.rc('font', size=20)
@@ -153,6 +158,4 @@ if __name__ == '__main__':
 
     if args.viz:
         logging.info(f'Visualizing results for image {in_filename}, close to continue...')
-        # plt.imshow(result)
-        # plt.xticks([]), plt.yticks([])
         plt.show()

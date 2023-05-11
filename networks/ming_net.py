@@ -1,5 +1,5 @@
-from ..unet import UNet
-from ..vision_transformer import SmallDatasetViT
+from .unet import UNet
+from .vision_transformer import SmallDatasetViT
 
 
 class MingNet(UNet):

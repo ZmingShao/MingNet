@@ -2,13 +2,10 @@ import argparse
 import logging
 import os
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from pathlib import Path
 from torch import optim
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
-import wandb
 import csv
 import numpy as np
 import matplotlib.pyplot as plt
@@ -35,7 +32,6 @@ def train_model(
         batch_size: int = 1,
         patch_size: int = 32,
         learning_rate: float = 1e-5,
-        val_percent: float = 0.1,
         img_scale: float = 0.5,
         img_size: int = 512,
         amp: bool = False,
@@ -45,13 +41,6 @@ def train_model(
         net_name: str = 'unet',
         save_results: bool = False,
 ):
-    # # (Initialize logging)
-    # experiment = wandb.init(project='U-Net', resume='allow', anonymous='must')
-    # experiment.config.update(
-    #     dict(epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
-    #          val_percent=val_percent, img_size=img_scale, amp=amp)
-    # )
-
     logging.info(f'''Starting training:
         Epochs:          {epochs}
         Batch size:      {batch_size}
@@ -65,7 +54,7 @@ def train_model(
         Mixed Precision: {amp}
     ''')
 
-    # (path to save results)
+    # Path to save results
     if save_results:
         dir_pth = dir_results / f'segment_{net_name}_e{epochs}_bs{batch_size}_p{patch_size}' \
                                 f'_lr{learning_rate}_s{img_scale:.1f}_amp{int(amp)}'
@@ -74,7 +63,7 @@ def train_model(
         csv_wrt = csv.writer(csv_file)
         csv_wrt.writerow(['Epoch', 'Loss', 'Dice'])
 
-    # 4. Set up the optimizer, the loss, the learning rate scheduler and the loss scaling for AMP
+    # Set up the optimizer, the loss, the learning rate scheduler and the loss scaling for AMP
     optimizer = optim.RMSprop(model.parameters(),
                               lr=learning_rate, weight_decay=weight_decay, momentum=momentum, foreach=True)
     # optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9, weight_decay=0.0001)
@@ -83,7 +72,7 @@ def train_model(
     loss_fn = LossFn(n_classes=n_classes)
     global_step = 0
 
-    # 5. Begin training
+    # Begin training
     val_score_list, epoch_loss_list = [], []
     for epoch in range(1, epochs + 1):
         model.train()
@@ -114,44 +103,7 @@ def train_model(
                 global_step += 1
                 epoch_loss.append(loss.item())
                 # epoch_loss += loss.item()
-                # experiment.log({
-                #     'train loss': loss.item(),
-                #     'step': global_step,
-                #     'epoch': epoch
-                # })
                 pbar.set_postfix(**{'loss (batch)': loss.item()})
-
-                # # Evaluation round
-                # division_step = (n_train // (5 * batch_size))
-                # if division_step > 0:
-                #     if global_step % division_step == 0:
-                #         histograms = {}
-                #         for tag, value in model.named_parameters():
-                #             tag = tag.replace('/', '.')
-                #             if not (torch.isinf(value) | torch.isnan(value)).any():
-                #                 histograms['Weights/' + tag] = wandb.Histogram(value.data.cpu())
-                #             if not (torch.isinf(value.grad) | torch.isnan(value.grad)).any():
-                #                 histograms['Gradients/' + tag] = wandb.Histogram(value.grad.data.cpu())
-                #
-                #         val_score = evaluate(model, val_loader, device, amp)
-                #         scheduler.step(val_score)
-                #
-                #         logging.info(f'Validation Dice score: {val_score}')
-                #         try:
-                #             experiment.log({
-                #                 'learning rate': optimizer.param_groups[0]['lr'],
-                #                 'validation Dice': val_score,
-                #                 'images': wandb.Image(images[0].cpu()),
-                #                 'masks': {
-                #                     'true': wandb.Image(true_masks[0].float().cpu()),
-                #                     'pred': wandb.Image(masks_pred.argmax(dim=1)[0].float().cpu()),
-                #                 },
-                #                 'step': global_step,
-                #                 'epoch': epoch,
-                #                 **histograms
-                #             })
-                #         except:
-                #             pass
 
         val_score = evaluate(model, val_loader, device, amp)
         scheduler.step(val_score)
@@ -228,7 +180,7 @@ if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logging.info(f'Using device {device}')
 
-    # 1. Create dataset
+    # Create dataset
     try:
         dataset = CTCDataset(ds_dir=dir_ds,
                              scale=args.scale,
@@ -239,18 +191,19 @@ if __name__ == '__main__':
         logging.error(e)
         exit(-1)
 
-    # 2. Split into train / validation partitions
+    # Split into train / validation partitions
     n_val = int(len(dataset) * args.val / 100)
     n_train = len(dataset) - n_val
     train_set, val_set = random_split(dataset, [n_train, n_val], generator=torch.Generator().manual_seed(0))
 
-    # 3. Create data loaders
+    # Create data loaders
     train_loader_args = dict(batch_size=args.batch_size, num_workers=os.cpu_count(), pin_memory=True)
     val_loader_args = dict(batch_size=1, num_workers=os.cpu_count(), pin_memory=True)
     train_loader = DataLoader(train_set, shuffle=True, **train_loader_args)
     val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **val_loader_args)
 
     for i in range(len(args.networks)):
+        # Load model
         print('------------------------------------------------------')
         args.net_name = args.networks[i]
         args.img_size = dataset.image_size()
@@ -267,6 +220,7 @@ if __name__ == '__main__':
             model.load_state_dict(state_dict)
             logging.info(f'Model loaded from {args.load}')
 
+        # Train model
         model.to(device=device)
         try:
             train_model(model=model,
@@ -278,7 +232,6 @@ if __name__ == '__main__':
                         batch_size=args.batch_size,
                         patch_size=args.patch_size,
                         learning_rate=args.lr,
-                        val_percent=args.val / 100,
                         img_scale=args.scale,
                         img_size=args.img_size,
                         amp=args.amp,

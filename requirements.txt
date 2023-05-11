@@ -22,3 +22,5 @@ batchgenerators>=0.21
 sklearn
 pandas
 nibabel
+Augmentor~=0.2.12
+argparse~=1.4.0
