@@ -123,7 +123,6 @@ class ViT(nn.Module):
 
     def forward(self, x):
         x = self.to_patch_embedding(x)
-        b, n, _ = x.shape
 
         x += self.pos_embedding
         x = self.dropout(x)
